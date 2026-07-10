@@ -96,7 +96,7 @@ extern "C" {
 #endif
 
 //------------- CLASS -------------//
-#define CFG_TUD_CDC               0
+#define CFG_TUD_CDC               1   // debug logging over USB serial (see debug_cdc.c)
 #define CFG_TUD_MSC               0
 #define CFG_TUD_HID               0
 #define CFG_TUD_MIDI              0
@@ -164,6 +164,13 @@ extern "C" {
 
 // Size of control request buffer
 #define CFG_TUD_AUDIO_FUNC_1_CTRL_BUF_SZ	64
+
+//--------------------------------------------------------------------
+// CDC (debug console) CONFIGURATION
+//--------------------------------------------------------------------
+#define CFG_TUD_CDC_RX_BUFSIZE    256
+#define CFG_TUD_CDC_TX_BUFSIZE    512
+#define CFG_TUD_CDC_EP_BUFSIZE    64
 
 #ifdef __cplusplus
 }

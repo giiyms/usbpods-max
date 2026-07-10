@@ -39,8 +39,13 @@
  {
    ITF_NUM_AUDIO_CONTROL = 0,
    ITF_NUM_AUDIO_STREAMING_SPK,
+   ITF_NUM_CDC,        // CDC-ACM control interface (debug console)
+   ITF_NUM_CDC_DATA,   // CDC-ACM data interface
    ITF_NUM_TOTAL
  };
+
+ // Number of interfaces spanned by the audio function's IAD (control + streaming).
+ #define ITF_NUM_AUDIO_COUNT  2
  
  #define TUD_AUDIO_HEADSET_STEREO_DESC_LEN (TUD_AUDIO_DESC_IAD_LEN\
      + TUD_AUDIO_DESC_STD_AC_LEN\
@@ -61,7 +66,7 @@
  
  #define TUD_AUDIO_HEADSET_STEREO_DESCRIPTOR(_stridx, _epout, _epin_unused, _epint) \
      /* Standard Interface Association Descriptor (IAD) */\
-     TUD_AUDIO_DESC_IAD(/*_firstitf*/ ITF_NUM_AUDIO_CONTROL, /*_nitfs*/ ITF_NUM_TOTAL, /*_stridx*/ 0x00),\
+     TUD_AUDIO_DESC_IAD(/*_firstitf*/ ITF_NUM_AUDIO_CONTROL, /*_nitfs*/ ITF_NUM_AUDIO_COUNT, /*_stridx*/ 0x00),\
      /* Standard AC Interface Descriptor(4.7.1) */\
      TUD_AUDIO_DESC_STD_AC(/*_itfnum*/ ITF_NUM_AUDIO_CONTROL, /*_nEPs*/ 0x01, /*_stridx*/ _stridx),\
      /* Class-Specific AC Interface Header Descriptor(4.7.2) */\

@@ -29,6 +29,7 @@
  #include "bsp/board_api.h"
  #include "tusb.h"
  #include "usb_descriptors.h"
+ #include "debug_cdc.h"
 
  #include "../btstack/btstack_avdtp_source.h"
  #include "pico/flash.h"
@@ -130,7 +131,8 @@
 
  void tinyusb_task(void){
     tud_task(); // TinyUSB device task
-    audio_task(); 
+    debug_cdc_task(); // drain buffered stdout to the CDC console (same context as tud_task)
+    audio_task();
  }
  
 

@@ -25,6 +25,7 @@
 #include "hardware/watchdog.h"
 
 #include "tinyusb/uac.h"
+#include "tinyusb/debug_cdc.h"
 #include "pico_w_led.h"
 #include "pico/flash.h"
 
@@ -194,6 +195,7 @@ int main() {
     }
 
     tinyusb_main();
+    debug_cdc_init();   // route printf() to the USB CDC debug console
 
     audio_slot_queue_init();
 
