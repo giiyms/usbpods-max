@@ -52,29 +52,33 @@ static stdio_driver_t debug_cdc_driver = {
 };
 
 void debug_cdc_init(void) {
+#ifndef DEBUG_CDC_DISABLED
     stdio_set_driver_enabled(&debug_cdc_driver, true);
+#endif
 }
 
 void debug_cdc_task(void) {
+#ifndef DEBUG_CDC_DISABLED
     // Drain only while a terminal is actually attached (DTR asserted). Until
     // then, output accumulates in the 8KB ring, so boot/pairing logs are still
     // delivered when the user opens the terminal late.
     if (!tud_cdc_connected()) return;
+    if (dbg_tail == dbg_head) return;
 
-    // Push as much as the CDC TX FIFO will currently accept. If no host is
-    // reading, tud_cdc_write_available() goes to 0 and we simply stop.
-    while (dbg_tail != dbg_head) {
-        uint32_t avail = tud_cdc_write_available();
-        if (avail == 0) break;
+    // Bounded work per call: at most ONE 64-byte chunk per tick. This runs in
+    // the 500us USB timer IRQ; an unbounded drain loop under heavy printf
+    // traffic could hog the IRQ.
+    uint32_t avail = tud_cdc_write_available();
+    if (avail == 0) return;
 
-        uint8_t  tmp[64];
-        uint32_t n = 0;
-        while (n < avail && n < sizeof(tmp) && dbg_tail != dbg_head) {
-            tmp[n++] = dbg_buf[dbg_tail];
-            dbg_tail = (dbg_tail + 1u) & DBG_BUF_MASK;
-        }
-        if (n == 0) break;
-        tud_cdc_write(tmp, n);
+    uint8_t  tmp[64];
+    uint32_t n = 0;
+    while (n < avail && n < sizeof(tmp) && dbg_tail != dbg_head) {
+        tmp[n++] = dbg_buf[dbg_tail];
+        dbg_tail = (dbg_tail + 1u) & DBG_BUF_MASK;
     }
+    if (n == 0) return;
+    tud_cdc_write(tmp, n);
     tud_cdc_write_flush();
+#endif
 }

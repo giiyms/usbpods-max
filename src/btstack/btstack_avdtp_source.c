@@ -2632,11 +2632,25 @@ static void avrcp_controller_packet_handler(uint8_t packet_type, uint16_t channe
     }  
 }
 
+// context heartbeat: btstack run-loop timer (fires in the async_context that
+// runs BTstack; if these stop while bus-driven events keep logging, the run
+// loop's at-time machinery is starving)
+static btstack_timer_source_t hbb_timer;
+static void hbb_handler(btstack_timer_source_t *ts) {
+    printf("[HB-B]%lu\n", (unsigned long)(to_ms_since_boot(get_absolute_time())/1000));
+    btstack_run_loop_set_timer(ts, 1000);
+    btstack_run_loop_add_timer(ts);
+}
+
 int btstack_main(int argc, const char * argv[]){
 
     l2cap_init();
     aacp_init();
     bt_hci_init();
+
+    btstack_run_loop_set_timer_handler(&hbb_timer, hbb_handler);
+    btstack_run_loop_set_timer(&hbb_timer, 1000);
+    btstack_run_loop_add_timer(&hbb_timer);
 
     // Initialize AVDTP Sink
     avdtp_source_init();

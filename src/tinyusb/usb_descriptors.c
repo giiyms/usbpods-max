@@ -131,6 +131,12 @@ uint8_t const desc_configuration[] =
 
   };
 
+// The declared total must match the actual emitted bytes. A mismatch corrupts
+// wTotalLength and/or the audio function's declared span
+// (CFG_TUD_AUDIO_FUNC_1_DESC_LEN), which makes drivers mis-parse interface
+// boundaries at runtime even when enumeration appears to succeed.
+TU_VERIFY_STATIC(sizeof(desc_configuration) == CONFIG_TOTAL_LEN, "config descriptor length mismatch");
+
 // Invoked when received GET CONFIGURATION DESCRIPTOR
 // Application return pointer to descriptor
 // Descriptor contents must exist long enough for transfer to complete

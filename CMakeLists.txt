@@ -102,10 +102,16 @@ ldacBT_abr
 target_compile_definitions(PicoW_USB_BT_Audio PRIVATE
     CYW43_LWIP=0
     PICO_FLASH_ASSUME_CORE1_SAFE=1
-    
+
     # must enable on rp2040 & 330kbps(MQ)
     #LDAC_SOFT_FLOAT=OFF
 )
+
+# Debug switch: keep the CDC interface enumerated but disable the printf hook
+# and drain logic (isolation testing). Configure with -DDEBUG_CDC_DISABLED=1.
+if(DEBUG_CDC_DISABLED)
+    target_compile_definitions(PicoW_USB_BT_Audio PRIVATE DEBUG_CDC_DISABLED=1)
+endif()
 
 
 

@@ -164,6 +164,9 @@ bool usb_timer_callback(repeating_timer_t *rt){
 bool bootsel_timer_callback(repeating_timer_t *rt) {
     (void)rt;
     check_bootsel_state();
+    // context heartbeat: alarm-pool timer IRQ (every 50 calls = ~1s)
+    static uint16_t hba = 0;
+    if (++hba >= 50) { hba = 0; printf("[HB-A]%lu\n", (unsigned long)(to_ms_since_boot(get_absolute_time())/1000)); }
     return true;    // keep repeating
 }
 
@@ -185,6 +188,13 @@ int main() {
                         // (drained over USB once tusb is up and a terminal opens)
 
     flash_safe_execute_core_init();
+
+    // Crash forensics: distinguish watchdog resets from clean power-on boots
+    if (watchdog_caused_reboot()) {
+        printf("!!! BOOT REASON: WATCHDOG RESET (previous run hung >2s)\n");
+    } else {
+        printf("boot reason: normal power-on/reset\n");
+    }
 
     uint8_t currect_slot = read_uint8_last_flash();
 
@@ -223,12 +233,16 @@ int main() {
     static repeating_timer_t bootsel_timer;
     add_repeating_timer_us(20000, bootsel_timer_callback, NULL, &bootsel_timer);
 
-    // Enable watchdog — auto-resets if main loop stops feeding it (2 seconds)
-    watchdog_enable(2000, true);
+    // Enable watchdog — auto-resets if main loop stops feeding it.
+    // TEMP (debug): extended 2s -> 8s to observe hang behavior; restore later.
+    watchdog_enable(8000, true);
 
+    uint16_t hbm = 0;
     while (1) {
         watchdog_update();  // feed the watchdog
         tinyusb_control_task();
+        // context heartbeat: main loop thread (every 10 iters = ~500ms)
+        if (++hbm >= 10) { hbm = 0; printf("[HB-M]%lu\n", (unsigned long)(to_ms_since_boot(get_absolute_time())/1000)); }
         sleep_ms(50);
     }
 
