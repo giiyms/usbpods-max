@@ -63,6 +63,7 @@ add_executable(${PROJECT_NAME}
     src/pico_w_led.c
     src/btstack/btstack_avdtp_source.c
     src/btstack/btstack_hci.c
+    src/btstack/btstack_aacp.c
     src/tinyusb/uac.c
     src/tinyusb/usb_descriptors.c
 )

@@ -50,6 +50,8 @@
 #include "pico/util/queue.h"
 
 #include "btstack_hci.h"
+#include "btstack_aacp.h"
+#include "classic/device_id_server.h"
 
 #include "../pico_w_led.h"
 
@@ -1221,6 +1223,10 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
             finish_setup_aac = false;
             status = avdtp_source_discover_stream_endpoints(media_tracker.avdtp_cid);
             a2dp_is_connected_flag = true;
+
+            // Phase 1: open the AACP channel (PSM 0x1001) to the same AirPods,
+            // once A2DP signaling is up. Runs after a short settle delay.
+            aacp_connect(cur_active_device);
 
             break;
         
@@ -2629,6 +2635,7 @@ static void avrcp_controller_packet_handler(uint8_t packet_type, uint16_t channe
 int btstack_main(int argc, const char * argv[]){
 
     l2cap_init();
+    aacp_init();
     bt_hci_init();
 
     // Initialize AVDTP Sink
@@ -2649,6 +2656,15 @@ int btstack_main(int argc, const char * argv[]){
 
     // Initialize SDP
     sdp_init();
+
+    // Device ID (DID) record advertising Apple as the vendor (0x004C). Several
+    // AACP features are gated on the host's DID VendorID being Apple (HANDOFF §3.7).
+    static uint8_t sdp_device_id_service_buffer[100];
+    memset(sdp_device_id_service_buffer, 0, sizeof(sdp_device_id_service_buffer));
+    device_id_create_sdp_record(sdp_device_id_service_buffer, 0x10005,
+                                DEVICE_ID_VENDOR_ID_SOURCE_BLUETOOTH, 0x004C, 0x0000, 0x0000);
+    sdp_register_service(sdp_device_id_service_buffer);
+
     memset(sdp_avdtp_source_service_buffer, 0, sizeof(sdp_avdtp_source_service_buffer));
     a2dp_source_create_sdp_record(sdp_avdtp_source_service_buffer, 0x10002, AVDTP_SOURCE_FEATURE_MASK_PLAYER, NULL, NULL);
     sdp_register_service(sdp_avdtp_source_service_buffer);
