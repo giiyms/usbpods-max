@@ -117,12 +117,23 @@ static void hci_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *p
 }
 
 
+// Erased flash (FF...) or filler patterns are not usable peer addresses.
+static bool slot_mac_valid(const uint8_t mac[6]){
+    if (mac[0] == 0xFF) return false;
+    for (int i = 1; i < 6; i++) {
+        if (mac[i] != mac[0]) return true;   // any variation -> looks real
+    }
+    return false;   // all six bytes identical -> garbage
+}
+
 void get_link_keys(void){
     bd_addr_t  addr;
     link_key_t link_key;
     link_key_type_t type;
     btstack_link_key_iterator_t it;
     const char * addr_str;
+    bool have_key0 = false;
+    bool have_key1 = false;
 
     int ok = gap_link_key_iterator_init(&it);
     if (!ok) {
@@ -137,6 +148,7 @@ void get_link_keys(void){
         printf_hexdump(link_key, 16);
         strncpy(device_addr_string, addr_str, sizeof(device_addr_string) - 1);
         sscanf_bd_addr(device_addr_string, device_addr_list[0]);
+        have_key0 = true;
     }
 
     //sscanf_bd_addr(device_addr_string, device_addr);
@@ -147,6 +159,7 @@ void get_link_keys(void){
         printf_hexdump(link_key, 16);
         strncpy(device_addr_string, addr_str, sizeof(device_addr_string) - 1);
         sscanf_bd_addr(device_addr_string, device_addr_list[1]);
+        have_key1 = true;
     }
 
     printf(".\n");
@@ -161,7 +174,13 @@ void get_link_keys(void){
         bd_addr_t  addr_flash_slot1;
         read_slot1_mac(addr_flash_slot1);
         printf("cur slot1 flash addr is %s\n ", bd_addr_to_str(addr_flash_slot1));
-        memcpy(device_addr, addr_flash_slot1, sizeof(bd_addr_t)); 
+        if (slot_mac_valid(addr_flash_slot1)) {
+            memcpy(device_addr, addr_flash_slot1, sizeof(bd_addr_t));
+        } else if (have_key0) {
+            // slot MAC lost/corrupted -> fall back to the paired device's address
+            printf("slot1 MAC invalid, falling back to link-key addr %s\n", bd_addr_to_str(device_addr_list[0]));
+            memcpy(device_addr, device_addr_list[0], sizeof(bd_addr_t));
+        }
     }
 
     if(currect_slot == 0x2){
@@ -170,9 +189,15 @@ void get_link_keys(void){
         bd_addr_t  addr_flash_slot2;
         read_slot2_mac(addr_flash_slot2);
         printf("cur slot2 flash addr is %s\n ", bd_addr_to_str(addr_flash_slot2));
-        memcpy(device_addr, addr_flash_slot2, sizeof(bd_addr_t)); 
+        if (slot_mac_valid(addr_flash_slot2)) {
+            memcpy(device_addr, addr_flash_slot2, sizeof(bd_addr_t));
+        } else if (have_key1 || have_key0) {
+            const uint8_t *fb = have_key1 ? device_addr_list[1] : device_addr_list[0];
+            printf("slot2 MAC invalid, falling back to link-key addr %s\n", bd_addr_to_str(fb));
+            memcpy(device_addr, fb, sizeof(bd_addr_t));
+        }
     }
-    
+
 }
 
 

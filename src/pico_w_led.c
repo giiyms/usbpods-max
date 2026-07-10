@@ -199,8 +199,15 @@ void stop_triple_blink(void){
 // #define FLASH_SECTOR_SIZE     4096
 #define FLASH_SIZE_BYTES      PICO_FLASH_SIZE_BYTES
 
-// We’ll write to the very last byte in flash:
-#define TARGET_OFFSET         (FLASH_SIZE_BYTES - 1)
+// NOTE: the BTstack link-key TLV (pico_btstack) uses the LAST TWO flash
+// sectors (PICO_FLASH_BANK_STORAGE_OFFSET = flash end - 2*4KB). The original
+// code stored the slot byte + MACs in the last sector, so every link-key
+// write could corrupt them (observed as EF-garbage slot MACs). Keep our
+// storage one sector below the TLV region.
+#define SLOT_STORAGE_SECTOR_BASE  (FLASH_SIZE_BYTES - 3 * FLASH_SECTOR_SIZE)
+
+// We write the slot byte to the very last byte of our own sector:
+#define TARGET_OFFSET         (SLOT_STORAGE_SECTOR_BASE + FLASH_SECTOR_SIZE - 1)
 
 // ─── RAM BUFFERS & STATE FOR CALLBACK ─────────────────────────────────────────
 static uint8_t  page_buf[FLASH_PAGE_SIZE] __attribute__((aligned(FLASH_PAGE_SIZE)));
@@ -269,10 +276,10 @@ uint8_t read_uint8_last_flash(void) {
 
 
 
-// Base of the final 256-byte page in flash:
-#define LAST_PAGE_BASE        (FLASH_SIZE_BYTES - FLASH_PAGE_SIZE)
+// Base of the final 256-byte page of OUR slot sector (below the BTstack TLV):
+#define LAST_PAGE_BASE        (SLOT_STORAGE_SECTOR_BASE + FLASH_SECTOR_SIZE - FLASH_PAGE_SIZE)
 // Base of its containing 4 KiB sector:
-#define LAST_SECTOR_BASE      (LAST_PAGE_BASE & ~(FLASH_SECTOR_SIZE - 1))
+#define LAST_SECTOR_BASE      SLOT_STORAGE_SECTOR_BASE
 
 // We carve out two 7-byte slots at the start of that page:
 

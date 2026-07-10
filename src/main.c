@@ -65,39 +65,78 @@ static bool __no_inline_not_in_flash_func(get_bootsel_button)() {
     return button_state;
 }
 
+// Button events are detected in the 20ms alarm-pool timer IRQ, but BTstack
+// APIs (and flash writes) must not be called from there: BTstack runs in the
+// cyw43 async context and a call from a foreign IRQ can deadlock on its lock
+// — observed as a watchdog reset when pressing the reconnect button. The IRQ
+// handlers only latch a request; the main loop executes it with the
+// async-context lock held.
+static volatile bool btn_single_pending = false;
+static volatile bool btn_double_pending = false;
+static volatile bool btn_long_pending   = false;
+
 void on_single_press(void){
     printf("key pressed short (single tap)!\n");
-    if (! get_a2dp_connected_flag()) {
-        a2dp_source_reconnect();
-    } else {
-        increase_vol_by_key();
-    }
+    btn_single_pending = true;
 }
 
 void on_double_press(void){
-    if(!get_allow_switch_slot()){
-        decrease_vol_by_key();
-        return;
-    }
-    uint8_t currect_slot = read_uint8_last_flash();
-    if (currect_slot == 0x1){
-        printf("switch to slot 2!\n");
-        set_led_mode_off();
-        set_led_mode_triple_blink();
-        write_uint8_last_flash(0x2);
-    } else{
-        printf("switch to slot 1!\n");
-        set_led_mode_off();
-        set_led_mode_double_blink();
-        write_uint8_last_flash(0x1);
-    }
-    get_link_keys();
     printf("key pressed double!\n");
+    btn_double_pending = true;
 }
 
 void on_long_press(void){
     printf("key pressed long!\n");
-    avdtp_disconnect_and_scan();
+    btn_long_pending = true;
+}
+
+// Runs in main-loop (thread) context.
+static void process_button_actions(void){
+    async_context_t *ctx = cyw43_arch_async_context();
+
+    if (btn_single_pending) {
+        btn_single_pending = false;
+        async_context_acquire_lock_blocking(ctx);
+        if (! get_a2dp_connected_flag()) {
+            a2dp_source_reconnect();
+        } else {
+            increase_vol_by_key();
+        }
+        async_context_release_lock(ctx);
+    }
+
+    if (btn_double_pending) {
+        btn_double_pending = false;
+        async_context_acquire_lock_blocking(ctx);
+        bool allow = get_allow_switch_slot();
+        if (!allow) decrease_vol_by_key();
+        async_context_release_lock(ctx);
+
+        if (allow) {
+            uint8_t currect_slot = read_uint8_last_flash();
+            if (currect_slot == 0x1){
+                printf("switch to slot 2!\n");
+                set_led_mode_off();
+                set_led_mode_triple_blink();
+                write_uint8_last_flash(0x2);
+            } else{
+                printf("switch to slot 1!\n");
+                set_led_mode_off();
+                set_led_mode_double_blink();
+                write_uint8_last_flash(0x1);
+            }
+            async_context_acquire_lock_blocking(ctx);
+            get_link_keys();
+            async_context_release_lock(ctx);
+        }
+    }
+
+    if (btn_long_pending) {
+        btn_long_pending = false;
+        async_context_acquire_lock_blocking(ctx);
+        avdtp_disconnect_and_scan();
+        async_context_release_lock(ctx);
+    }
 }
 
 // ---------- parameters ----------
@@ -228,7 +267,12 @@ int main() {
     // multicore_launch_core1_with_stack(core1_aaceld_encoder_loop, core1_stack, sizeof(core1_stack));
 
     static repeating_timer_t usb_timer;
-    add_repeating_timer_us(-500, usb_timer_callback, NULL, &usb_timer);
+    // POSITIVE interval: schedule 500us after the callback RETURNS. The
+    // negative (hard-period) form catches up with back-to-back firings when
+    // the callback overruns; combined with bursty BT logging + CDC drain in
+    // the same callback, that starved every lower-priority context (main
+    // loop, other timers, btstack at-time workers) until the watchdog fired.
+    add_repeating_timer_us(500, usb_timer_callback, NULL, &usb_timer);
 
     static repeating_timer_t bootsel_timer;
     add_repeating_timer_us(20000, bootsel_timer_callback, NULL, &bootsel_timer);
@@ -240,6 +284,7 @@ int main() {
     uint16_t hbm = 0;
     while (1) {
         watchdog_update();  // feed the watchdog
+        process_button_actions();
         tinyusb_control_task();
         // context heartbeat: main loop thread (every 10 iters = ~500ms)
         if (++hbm >= 10) { hbm = 0; printf("[HB-M]%lu\n", (unsigned long)(to_ms_since_boot(get_absolute_time())/1000)); }
