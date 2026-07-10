@@ -181,6 +181,8 @@ int main() {
     // // enable to use uart see debug info
     stdio_init_all();
     stdout_uart_init();
+    debug_cdc_init();   // route printf() into the CDC ring from the very start
+                        // (drained over USB once tusb is up and a terminal opens)
 
     flash_safe_execute_core_init();
 
@@ -195,7 +197,6 @@ int main() {
     }
 
     tinyusb_main();
-    debug_cdc_init();   // route printf() to the USB CDC debug console
 
     audio_slot_queue_init();
 

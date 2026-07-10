@@ -196,11 +196,16 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
 }
 
 
+// separate registration for the state logger — reusing hci_event_callback_registration
+// for both handlers means the second hci_add_event_handler() call is rejected as a
+// duplicate list item and only the callback assigned last would ever run
+static btstack_packet_callback_registration_t hci_state_callback_registration;
+
 void bt_hci_init(void){
 
     // inform about BTstack state
-    hci_event_callback_registration.callback = &packet_handler;
-    hci_add_event_handler(&hci_event_callback_registration);
+    hci_state_callback_registration.callback = &packet_handler;
+    hci_add_event_handler(&hci_state_callback_registration);
 
     // Request role change on reconnecting headset to always use them in slave mode
     hci_set_master_slave_policy(0);

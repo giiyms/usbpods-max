@@ -16,8 +16,15 @@
 #include "btstack_aacp.h"
 
 #define AACP_PSM              0x1001
-#define AACP_LOCAL_MTU        4096   // 0x58 audio SDU can exceed 1KB (HANDOFF §3.1)
+// Requested local MTU. NOTE: BTstack clamps this to l2cap_max_mtu() =
+// HCI_ACL_PAYLOAD_SIZE - 4 (currently 1691), which is what actually gets
+// advertised. 0x58 audio SDUs can exceed 1KB (HANDOFF §3.1); if Phase 2 shows
+// SDUs larger than the effective MTU being dropped, raise HCI_ACL_PAYLOAD_SIZE
+// in btstack_config.h instead of this constant.
+#define AACP_LOCAL_MTU        4096
 #define AACP_CONNECT_DELAY_MS 1500   // let A2DP settle before opening the channel
+#define AACP_RETRY_DELAY_MS   3000   // delay between connect retries
+#define AACP_MAX_ATTEMPTS     3      // initial attempt + retries per A2DP session
 
 // --- Fixed init byte sequences (HANDOFF §3.2) ---
 
@@ -52,6 +59,8 @@ static uint8_t    aacp_init_seq_idx = 0;
 static uint16_t   aacp_cid       = 0;
 static bool       aacp_connected = false;
 static bd_addr_t  aacp_addr;
+static uint8_t    aacp_attempts  = 0;      // connect attempts this A2DP session
+static bool       aacp_got_control = false; // first valid AACP control packet seen
 
 static btstack_timer_source_t aacp_connect_timer;
 
@@ -69,7 +78,10 @@ void aacp_init(void) {
 static void aacp_do_connect(btstack_timer_source_t *ts) {
     UNUSED(ts);
     if (aacp_cid != 0) return;  // already connecting/connected
-    printf("[AACP] connecting to %s PSM 0x%04x ...\n", bd_addr_to_str(aacp_addr), AACP_PSM);
+    aacp_attempts++;
+    printf("[AACP] connecting to %s PSM 0x%04x (attempt %u/%u, local mtu %u) ...\n",
+           bd_addr_to_str(aacp_addr), AACP_PSM, aacp_attempts, AACP_MAX_ATTEMPTS,
+           btstack_min(AACP_LOCAL_MTU, l2cap_max_mtu()));
     uint8_t status = l2cap_create_channel(aacp_packet_handler, aacp_addr, AACP_PSM,
                                           AACP_LOCAL_MTU, &aacp_cid);
     if (status != ERROR_CODE_SUCCESS) {
@@ -78,12 +90,28 @@ static void aacp_do_connect(btstack_timer_source_t *ts) {
     }
 }
 
+// Re-arm the connect timer for a retry, if attempts remain.
+static void aacp_schedule_retry(void) {
+    if (aacp_attempts >= AACP_MAX_ATTEMPTS) {
+        printf("[AACP] giving up after %u attempts. If this persists: re-pair "
+               "(BOOTSEL long press) so the AirPods pick up our DID record.\n", aacp_attempts);
+        return;
+    }
+    printf("[AACP] retrying in %d ms\n", AACP_RETRY_DELAY_MS);
+    btstack_run_loop_remove_timer(&aacp_connect_timer);
+    btstack_run_loop_set_timer_handler(&aacp_connect_timer, aacp_do_connect);
+    btstack_run_loop_set_timer(&aacp_connect_timer, AACP_RETRY_DELAY_MS);
+    btstack_run_loop_add_timer(&aacp_connect_timer);
+}
+
 void aacp_connect(bd_addr_t addr) {
     if (aacp_cid != 0) {
         printf("[AACP] connect ignored, channel already active (cid 0x%04x)\n", aacp_cid);
         return;
     }
     memcpy(aacp_addr, addr, sizeof(bd_addr_t));
+    aacp_attempts    = 0;
+    aacp_got_control = false;
     printf("[AACP] scheduling connect in %d ms\n", AACP_CONNECT_DELAY_MS);
     btstack_run_loop_remove_timer(&aacp_connect_timer);
     btstack_run_loop_set_timer_handler(&aacp_connect_timer, aacp_do_connect);
@@ -147,6 +175,7 @@ static void aacp_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *
                         printf("[AACP] channel open FAILED: status 0x%02x\n", status);
                         aacp_cid       = 0;
                         aacp_connected = false;
+                        aacp_schedule_retry();
                         return;
                     }
                     aacp_cid       = cid;
@@ -172,7 +201,24 @@ static void aacp_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *
 
         case L2CAP_DATA_PACKET:
             // Phase 1: dump everything. Phase 2 will branch here on 0x58 audio SDUs.
-            printf("[AACP] RX %u bytes:\n", size);
+            // Control packets carry the 04 00 04 00 header + u16le opcode (HANDOFF §3.2).
+            if (size >= 6 && packet[0] == 0x04 && packet[1] == 0x00 &&
+                packet[2] == 0x04 && packet[3] == 0x00) {
+                uint16_t opcode = little_endian_read_16(packet, 4);
+                const char *name = "";
+                switch (opcode) {
+                    case 0x0004: name = " (BATTERY_INFO)"; break;
+                    case 0x001D: name = " (INFORMATION)";  break;
+                    default: break;
+                }
+                if (!aacp_got_control) {
+                    aacp_got_control = true;
+                    printf("[AACP] *** PHASE 1 SUCCESS: AACP control packet received ***\n");
+                }
+                printf("[AACP] RX %u bytes, opcode 0x%04x%s:\n", size, opcode, name);
+            } else {
+                printf("[AACP] RX %u bytes (no data header):\n", size);
+            }
             printf_hexdump(packet, size);
             break;
 

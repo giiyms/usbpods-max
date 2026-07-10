@@ -56,7 +56,10 @@ void debug_cdc_init(void) {
 }
 
 void debug_cdc_task(void) {
-    if (!tud_mounted()) return;
+    // Drain only while a terminal is actually attached (DTR asserted). Until
+    // then, output accumulates in the 8KB ring, so boot/pairing logs are still
+    // delivered when the user opens the terminal late.
+    if (!tud_cdc_connected()) return;
 
     // Push as much as the CDC TX FIFO will currently accept. If no host is
     // reading, tud_cdc_write_available() goes to 0 and we simply stop.
