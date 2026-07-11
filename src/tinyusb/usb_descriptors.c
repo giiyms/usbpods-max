@@ -124,7 +124,7 @@ uint8_t const desc_configuration[] =
     TUD_CONFIG_DESCRIPTOR(1, ITF_NUM_TOTAL, 0, CONFIG_TOTAL_LEN, 0x00, 100),
 
     // Interface number, string index, EP Out & EP In address, EP size
-    TUD_AUDIO_HEADSET_STEREO_DESCRIPTOR(2, EPNUM_AUDIO_OUT, 0x00, EPNUM_AUDIO_INT | 0x80),
+    TUD_AUDIO_HEADSET_STEREO_DESCRIPTOR(2, EPNUM_AUDIO_OUT, EPNUM_AUDIO_IN | 0x80, EPNUM_AUDIO_INT | 0x80),
 
     // CDC-ACM debug console: control itf, string idx, notif EP, notif size, data OUT, data IN, data EP size
     TUD_CDC_DESCRIPTOR(ITF_NUM_CDC, 6, EPNUM_CDC_NOTIF, 8, EPNUM_CDC_OUT, EPNUM_CDC_IN, 64)

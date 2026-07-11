@@ -38,10 +38,11 @@
 #define AACP_RETRY_DELAY_MS   3000   // delay between connect retries
 #define AACP_MAX_ATTEMPTS     3      // initial attempt + retries per A2DP session
 
-// Phase 2 temporary trigger: send mic START this long after the first AACP
-// control packet confirms the channel is functional. Replaced by the USB alt
-// setting callback in Phase 4 (HANDOFF §5-1).
-#define AACP_MIC_AUTOSTART_MS 10000
+// Mic lifecycle (HANDOFF §5-1): the ONLY trigger is the USB alt setting —
+// main.c calls aacp_mic_start()/aacp_mic_stop() when the host opens/closes
+// the recording stream. If the host opens the mic before the AACP channel is
+// up (or the channel drops mid-capture), the start is remembered and fired
+// as soon as the first control packet confirms the channel.
 
 // --- Fixed init byte sequences (HANDOFF §3.2) ---
 
@@ -102,7 +103,8 @@ static btstack_timer_source_t aacp_connect_timer;
 #define TYPE58_HEADER_LEN 22
 
 static bool aacp_mic_running = false;   // START sent, STOP not yet sent
-static btstack_timer_source_t aacp_mic_trigger_timer;  // temp autostart
+static bool aacp_mic_want    = false;   // host wants the mic (USB alt 1),
+                                        // start deferred until channel is up
 static btstack_timer_source_t aacp_mic_stats_timer;    // 1 Hz report
 
 // RX statistics — cumulative since START, plus per-interval rates.
@@ -266,8 +268,9 @@ static void aacp_mic_stats_report(btstack_timer_source_t *ts) {
 }
 
 void aacp_mic_start(void) {
+    aacp_mic_want = true;
     if (aacp_cid == 0 || !aacp_connected) {
-        printf("[MIC] start ignored — AACP channel not open\n");
+        printf("[MIC] start deferred — AACP channel not open yet\n");
         return;
     }
     if (aacp_mic_running) return;
@@ -283,6 +286,7 @@ void aacp_mic_start(void) {
         printf("[MIC] WARNING: decoder unavailable, continuing stats-only\n");
     }
     aacp_mic_dec_reset_stats();
+    aacp_mic_pcm_reset();   // fresh USB PCM session
 
     printf("[MIC] sending START (hi-res mic, AAC-ELD mono 64kHz expected)\n");
     aacp_tx_enqueue(aacp_mic_start_bytes, sizeof(aacp_mic_start_bytes));
@@ -294,6 +298,7 @@ void aacp_mic_start(void) {
 }
 
 void aacp_mic_stop(void) {
+    aacp_mic_want = false;
     if (!aacp_mic_running) return;
     printf("[MIC] sending STOP (total: %lu SDUs, %lu AUs)\n",
            (unsigned long) mic_stats.sdu_total, (unsigned long) mic_stats.au_total);
@@ -310,16 +315,7 @@ bool aacp_mic_active(void) {
 // Stop timers / clear state without sending anything (channel may be gone).
 static void aacp_mic_teardown(void) {
     aacp_mic_running = false;
-    btstack_run_loop_remove_timer(&aacp_mic_trigger_timer);
     btstack_run_loop_remove_timer(&aacp_mic_stats_timer);
-}
-
-// Temporary Phase 2 trigger (replaced by USB alt setting in Phase 4).
-static void aacp_mic_autostart(btstack_timer_source_t *ts) {
-    UNUSED(ts);
-    printf("[MIC] autostart trigger (Phase 2 temp: %d ms after first control packet)\n",
-           AACP_MIC_AUTOSTART_MS);
-    aacp_mic_start();
 }
 
 // --- type-0x58 audio SDU handling (port of librepods aacp_audio.rs) ---
@@ -415,11 +411,12 @@ static void aacp_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *
                 if (!aacp_got_control) {
                     aacp_got_control = true;
                     printf("[AACP] *** control channel confirmed (first packet) ***\n");
-                    // Phase 2 temp trigger: mic START after a settle window.
-                    btstack_run_loop_remove_timer(&aacp_mic_trigger_timer);
-                    btstack_run_loop_set_timer_handler(&aacp_mic_trigger_timer, aacp_mic_autostart);
-                    btstack_run_loop_set_timer(&aacp_mic_trigger_timer, AACP_MIC_AUTOSTART_MS);
-                    btstack_run_loop_add_timer(&aacp_mic_trigger_timer);
+                    // Host already holds the mic open (USB alt 1)? Fire the
+                    // deferred START now that the channel is confirmed.
+                    if (aacp_mic_want && !aacp_mic_running) {
+                        printf("[MIC] firing deferred START\n");
+                        aacp_mic_start();
+                    }
                 }
 #ifndef FORENSICS_DISABLED
                 uint16_t opcode = little_endian_read_16(packet, 4);

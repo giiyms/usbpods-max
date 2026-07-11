@@ -4,6 +4,7 @@
 
 #include "btstack/btstack_avdtp_source.h"
 #include "btstack/btstack_hci.h"
+#include "btstack/btstack_aacp.h"
 #include "btstack/aacp_mic_dec.h"
 
 #include <stdio.h>
@@ -301,6 +302,22 @@ int main() {
         watchdog_update();  // feed the watchdog
         process_button_actions();
         tinyusb_control_task();
+
+        // Phase 4: mic lifecycle. USB alt-setting callbacks (IRQ context)
+        // latch requests; execute them here with the async-context lock —
+        // same pattern as the buttons above.
+        if (usb_mic_take_start_request()) {
+            async_context_t *ctx = cyw43_arch_async_context();
+            async_context_acquire_lock_blocking(ctx);
+            aacp_mic_start();
+            async_context_release_lock(ctx);
+        }
+        if (usb_mic_take_stop_request()) {
+            async_context_t *ctx = cyw43_arch_async_context();
+            async_context_acquire_lock_blocking(ctx);
+            aacp_mic_stop();
+            async_context_release_lock(ctx);
+        }
 
         // Phase 3: open the AAC-ELD mic decoder from the MAIN LOOP (plain
         // thread context), delayed to 8s after boot so USB has enumerated and

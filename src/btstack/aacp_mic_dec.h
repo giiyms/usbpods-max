@@ -32,4 +32,15 @@ void aacp_mic_dec_report(void);
 // Reset cumulative statistics (called on mic START).
 void aacp_mic_dec_reset_stats(void);
 
+// --- Phase 4: decoded-PCM ring buffer (mono 16-bit @ 64 kHz) ---
+// Single producer (decoder, BTstack context) / single consumer (USB IN
+// callback in the USB timer IRQ) — lock-free.
+
+// Pull up to `n` samples into dst; returns the number actually read.
+// The USB callback zero-fills any shortfall.
+uint32_t aacp_mic_pcm_read(int16_t *dst, uint32_t n);
+
+// Drop any buffered samples (called on mic START for a clean session).
+void aacp_mic_pcm_reset(void);
+
 #endif // AACP_MIC_DEC_H

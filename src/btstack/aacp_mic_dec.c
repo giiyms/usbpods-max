@@ -34,6 +34,48 @@ static INT_PCM mic_pcm[MIC_PCM_MAX_SAMPLES];
 static HANDLE_AACDECODER mic_dec = NULL;
 static bool mic_dec_streaminfo_logged = false;
 
+// --- Phase 4: decoded-PCM ring (mono 16-bit @ 64 kHz) ---
+// 8192 samples = 16KB = 128ms of audio; absorbs the SDU batching jitter
+// (AUs arrive in ~30ms bursts of 4). Lock-free SPSC: producer is the decoder
+// (BTstack context), consumer is the USB IN callback (USB timer IRQ).
+#define MIC_RING_SAMPLES 8192u              // power of two
+#define MIC_RING_MASK    (MIC_RING_SAMPLES - 1u)
+static int16_t           mic_ring[MIC_RING_SAMPLES];
+static volatile uint32_t mic_ring_w = 0;    // producer index (monotonic)
+static volatile uint32_t mic_ring_r = 0;    // consumer index (monotonic)
+static uint32_t          mic_ring_overrun = 0;  // samples dropped, ring full
+
+static void mic_pcm_write(const int16_t *src, uint32_t n) {
+    uint32_t w = mic_ring_w, r = mic_ring_r;
+    uint32_t space = MIC_RING_SAMPLES - (w - r);
+    if (n > space) {                        // full: drop the oldest new data
+        mic_ring_overrun += n - space;
+        n = space;
+    }
+    for (uint32_t i = 0; i < n; i++) {
+        mic_ring[(w + i) & MIC_RING_MASK] = src[i];
+    }
+    __asm volatile ("" ::: "memory");       // data before index
+    mic_ring_w = w + n;
+}
+
+uint32_t aacp_mic_pcm_read(int16_t *dst, uint32_t n) {
+    uint32_t w = mic_ring_w, r = mic_ring_r;
+    uint32_t avail = w - r;
+    if (n > avail) n = avail;
+    for (uint32_t i = 0; i < n; i++) {
+        dst[i] = mic_ring[(r + i) & MIC_RING_MASK];
+    }
+    __asm volatile ("" ::: "memory");
+    mic_ring_r = r + n;
+    return n;
+}
+
+void aacp_mic_pcm_reset(void) {
+    mic_ring_r = mic_ring_w;
+    mic_ring_overrun = 0;
+}
+
 static struct {
     // interval (reset each report)
     uint32_t ok_interval;
@@ -128,7 +170,10 @@ bool aacp_mic_dec_decode(const uint8_t *au, uint16_t len) {
     uint32_t dt = time_us_32() - t0;
 
     if (err != AAC_DEC_OK) {
-        // Phase 4 will insert 480 samples of silence here for PCM continuity.
+        // Keep PCM continuity for the USB stream: substitute one frame of
+        // silence for the failed AU (HANDOFF §3.6).
+        static const int16_t silence[480] = { 0 };
+        mic_pcm_write(silence, 480);
         dstat.err_interval++;
         dstat.err_total++;
         return false;
@@ -149,9 +194,12 @@ bool aacp_mic_dec_decode(const uint8_t *au, uint16_t len) {
                (int) si->sampleRate, (int) si->numChannels, (int) si->frameSize, (int) si->aot);
     }
 
-    // PCM level stats over the decoded frame.
+    // Feed the USB mic path (mono: frameSize samples as-is at 64 kHz).
     int samples = (si != NULL) ? (int)(si->frameSize * si->numChannels) : 480;
     if (samples > MIC_PCM_MAX_SAMPLES) samples = MIC_PCM_MAX_SAMPLES;
+    mic_pcm_write(mic_pcm, (uint32_t) samples);
+
+    // PCM level stats over the decoded frame.
     for (int i = 0; i < samples; i++) {
         int32_t s = mic_pcm[i];
         dstat.sq_sum += (uint64_t)((int64_t) s * s);
@@ -171,14 +219,16 @@ void aacp_mic_dec_report(void) {
     if (dstat.sq_samples > 0) {
         rms = (uint32_t) sqrtf((float)(dstat.sq_sum / dstat.sq_samples));
     }
-    printf("[DEC] ok/s=%lu err=%lu(total %lu) dec_us avg/max=%lu/%lu rms=%lu peak=%ld\n",
+    printf("[DEC] ok/s=%lu err=%lu(total %lu) dec_us avg/max=%lu/%lu rms=%lu peak=%ld ring=%lu%s\n",
            (unsigned long) ok,
            (unsigned long) dstat.err_interval,
            (unsigned long) dstat.err_total,
            (unsigned long) avg_us,
            (unsigned long) dstat.dec_us_max,
            (unsigned long) rms,
-           (long) dstat.peak);
+           (long) dstat.peak,
+           (unsigned long) (mic_ring_w - mic_ring_r),
+           mic_ring_overrun ? " OVERRUN" : "");
 
     dstat.ok_interval  = 0;
     dstat.err_interval = 0;
