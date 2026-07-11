@@ -99,6 +99,12 @@ ldacBT_enc
 ldacBT_abr
 )
 
+# Drop the blocking UART stdout path entirely. UART writes stall the calling
+# context (~1ms per ~12 chars at 115200); printf from IRQs / the BTstack run
+# loop caused audio stutter and stalls. We log through the CDC ring instead
+# (non-blocking producer, drained in the USB task) — see src/tinyusb/debug_cdc.c.
+pico_enable_stdio_uart(PicoW_USB_BT_Audio 0)
+
 target_compile_definitions(PicoW_USB_BT_Audio PRIVATE
     CYW43_LWIP=0
     PICO_FLASH_ASSUME_CORE1_SAFE=1

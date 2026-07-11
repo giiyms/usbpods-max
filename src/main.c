@@ -225,9 +225,10 @@ int main() {
     sleep_ms(100);
     set_sys_clock_khz(250000, true);
 
-    // // enable to use uart see debug info
+    // stdio: UART stdout is disabled at the CMake level (pico_enable_stdio_uart 0)
+    // because its blocking writes from IRQs / the BTstack run loop stalled audio.
+    // All printf() goes into the CDC ring only (non-blocking producer).
     stdio_init_all();
-    stdout_uart_init();
     debug_cdc_init();   // route printf() into the CDC ring from the very start
                         // (drained over USB once tusb is up and a terminal opens)
 
