@@ -239,7 +239,12 @@ static void aacp_queue_init_sequence(void) {
 // >2000ms while capture is active → STOP + START to restart the stream.
 static void aacp_mic_stats_report(btstack_timer_source_t *ts) {
     uint32_t now = btstack_run_loop_get_time_ms();
-    bool stalled = mic_stats.sdu_total && (now - mic_stats.last_sdu_ms) > 2000;
+    // Covers BOTH stall cases: stream died mid-capture AND "START ignored"
+    // (no SDU ever arrived — happens when START lands too soon after the
+    // AACP handshake, e.g. host opened the mic before/during BT connect;
+    // last_sdu_ms is initialized to the START time so the retry kicks in
+    // 2s later either way).
+    bool stalled = (now - mic_stats.last_sdu_ms) > 2000;
     uint32_t avg = mic_stats.au_interval ? (mic_stats.au_bytes_interval / mic_stats.au_interval) : 0;
     printf("[MIC] sdu/s=%lu au/s=%lu au min/avg/max=%u/%lu/%u sdu_max=%u total_au=%lu%s%s\n",
            (unsigned long) mic_stats.sdu_interval,
