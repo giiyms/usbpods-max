@@ -202,8 +202,19 @@ static void aacp_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *
         case L2CAP_DATA_PACKET:
             // Phase 1: dump everything. Phase 2 will branch here on 0x58 audio SDUs.
             // Control packets carry the 04 00 04 00 header + u16le opcode (HANDOFF §3.2).
+            //
+            // CAUTION: this handler runs in the BTstack run loop. printf goes out
+            // over blocking UART; hex-dumping a large RX burst (the AirPods send a
+            // ~500B device-info dump ~30s after connect) blocks BTstack for long
+            // enough to underrun A2DP media. All RX logging is therefore compiled
+            // out with -DFORENSICS_DISABLED=1.
             if (size >= 6 && packet[0] == 0x04 && packet[1] == 0x00 &&
                 packet[2] == 0x04 && packet[3] == 0x00) {
+                if (!aacp_got_control) {
+                    aacp_got_control = true;
+                    printf("[AACP] *** PHASE 1 SUCCESS: AACP control packet received ***\n");
+                }
+#ifndef FORENSICS_DISABLED
                 uint16_t opcode = little_endian_read_16(packet, 4);
                 const char *name = "";
                 switch (opcode) {
@@ -211,15 +222,16 @@ static void aacp_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *
                     case 0x001D: name = " (INFORMATION)";  break;
                     default: break;
                 }
-                if (!aacp_got_control) {
-                    aacp_got_control = true;
-                    printf("[AACP] *** PHASE 1 SUCCESS: AACP control packet received ***\n");
-                }
                 printf("[AACP] RX %u bytes, opcode 0x%04x%s:\n", size, opcode, name);
+#endif
             } else {
+#ifndef FORENSICS_DISABLED
                 printf("[AACP] RX %u bytes (no data header):\n", size);
+#endif
             }
+#ifndef FORENSICS_DISABLED
             printf_hexdump(packet, size);
+#endif
             break;
 
         default:
