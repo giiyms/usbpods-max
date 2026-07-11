@@ -203,9 +203,14 @@ bool usb_timer_callback(repeating_timer_t *rt){
 bool bootsel_timer_callback(repeating_timer_t *rt) {
     (void)rt;
     check_bootsel_state();
+#ifndef FORENSICS_DISABLED
     // context heartbeat: alarm-pool timer IRQ (every 50 calls = ~1s)
+    // NOTE: printf here goes out over UART too, which BLOCKS (~1ms at 115200)
+    // inside the alarm IRQ and delays the 500us USB timer — suspected cause of
+    // periodic audio stutter. Compile out with -DFORENSICS_DISABLED=1.
     static uint16_t hba = 0;
     if (++hba >= 50) { hba = 0; printf("[HB-A]%lu\n", (unsigned long)(to_ms_since_boot(get_absolute_time())/1000)); }
+#endif
     return true;    // keep repeating
 }
 
@@ -267,12 +272,19 @@ int main() {
     // multicore_launch_core1_with_stack(core1_aaceld_encoder_loop, core1_stack, sizeof(core1_stack));
 
     static repeating_timer_t usb_timer;
-    // POSITIVE interval: schedule 500us after the callback RETURNS. The
-    // negative (hard-period) form catches up with back-to-back firings when
-    // the callback overruns; combined with bursty BT logging + CDC drain in
-    // the same callback, that starved every lower-priority context (main
-    // loop, other timers, btstack at-time workers) until the watchdog fired.
-    add_repeating_timer_us(500, usb_timer_callback, NULL, &usb_timer);
+    // NEGATIVE interval (hard period): fire every 500us measured from the
+    // previous START, so tinyusb_task() runs at a steady cadence regardless of
+    // how long each call takes. USB audio is isochronous — the OUT endpoint must
+    // be serviced on a fixed rhythm or samples drift/underrun. This is what the
+    // proven-stable upstream release uses.
+    //
+    // (History: this was briefly changed to +500 while chasing a streaming
+    // crash, on the theory that overrun "catch-up" starved other contexts. That
+    // crash was actually the TinyUSB 0.18 endpoint panic — see the SDK patch in
+    // tools/sdk-patches — not the timer. The +500 form instead let the effective
+    // USB service period stretch under load, causing periodic audio stutter and
+    // a stall after ~30s. Reverted to match upstream.)
+    add_repeating_timer_us(-500, usb_timer_callback, NULL, &usb_timer);
 
     static repeating_timer_t bootsel_timer;
     add_repeating_timer_us(20000, bootsel_timer_callback, NULL, &bootsel_timer);
@@ -286,8 +298,10 @@ int main() {
         watchdog_update();  // feed the watchdog
         process_button_actions();
         tinyusb_control_task();
+#ifndef FORENSICS_DISABLED
         // context heartbeat: main loop thread (every 10 iters = ~500ms)
         if (++hbm >= 10) { hbm = 0; printf("[HB-M]%lu\n", (unsigned long)(to_ms_since_boot(get_absolute_time())/1000)); }
+#endif
         sleep_ms(50);
     }
 

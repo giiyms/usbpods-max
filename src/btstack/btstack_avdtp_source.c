@@ -1226,7 +1226,11 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
 
             // Phase 1: open the AACP channel (PSM 0x1001) to the same AirPods,
             // once A2DP signaling is up. Runs after a short settle delay.
+#ifndef AACP_DISABLED
             aacp_connect(cur_active_device);
+#else
+            printf("[AACP] DISABLED at build time (isolation test) — skipping connect\n");
+#endif
 
             break;
         
@@ -2632,6 +2636,7 @@ static void avrcp_controller_packet_handler(uint8_t packet_type, uint16_t channe
     }  
 }
 
+#ifndef FORENSICS_DISABLED
 // context heartbeat: btstack run-loop timer (fires in the async_context that
 // runs BTstack; if these stop while bus-driven events keep logging, the run
 // loop's at-time machinery is starving)
@@ -2641,6 +2646,7 @@ static void hbb_handler(btstack_timer_source_t *ts) {
     btstack_run_loop_set_timer(ts, 1000);
     btstack_run_loop_add_timer(ts);
 }
+#endif
 
 int btstack_main(int argc, const char * argv[]){
 
@@ -2648,9 +2654,11 @@ int btstack_main(int argc, const char * argv[]){
     aacp_init();
     bt_hci_init();
 
+#ifndef FORENSICS_DISABLED
     btstack_run_loop_set_timer_handler(&hbb_timer, hbb_handler);
     btstack_run_loop_set_timer(&hbb_timer, 1000);
     btstack_run_loop_add_timer(&hbb_timer);
+#endif
 
     // Initialize AVDTP Sink
     avdtp_source_init();

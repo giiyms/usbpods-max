@@ -140,6 +140,7 @@ void tinyusb_control_task(void){
   //tud_task(); // TinyUSB device task
   audio_control_task();
 
+#ifndef FORENSICS_DISABLED
   // Debug heartbeat: called every ~50ms from the main loop; log uptime + USB
   // state every ~10s so the ring buffer records what the device saw right
   // before any USB drop (suspend? unmount? still alive?).
@@ -150,6 +151,7 @@ void tinyusb_control_task(void){
            (unsigned long)(to_ms_since_boot(get_absolute_time()) / 1000),
            (int)tud_mounted(), (int)tud_suspended());
   }
+#endif
 }
 
  //--------------------------------------------------------------------+

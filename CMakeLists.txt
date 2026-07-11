@@ -113,6 +113,21 @@ if(DEBUG_CDC_DISABLED)
     target_compile_definitions(PicoW_USB_BT_Audio PRIVATE DEBUG_CDC_DISABLED=1)
 endif()
 
+# Debug switch: skip opening the AACP channel entirely (never call aacp_connect).
+# Isolation test for the streaming crash — with this set the build should behave
+# like upstream (pure A2DP source). Configure with -DAACP_DISABLED=1.
+if(AACP_DISABLED)
+    target_compile_definitions(PicoW_USB_BT_Audio PRIVATE AACP_DISABLED=1)
+endif()
+
+# Debug switch: compile out the forensics heartbeats ([HB-A]/[HB-M]/[HB-B]/[HB]).
+# [HB-A] in particular printf()s from an alarm IRQ, where the blocking UART
+# write (~1ms @115200) can delay the 500us USB audio timer and cause periodic
+# stutter. Configure with -DFORENSICS_DISABLED=1.
+if(FORENSICS_DISABLED)
+    target_compile_definitions(PicoW_USB_BT_Audio PRIVATE FORENSICS_DISABLED=1)
+endif()
+
 
 
 # Export binaries like hex, bin, and uf2 files.
