@@ -9,6 +9,7 @@
 //
 
 #include <stdint.h>
+#include <stdio.h>
 
 #include "pico/stdio/driver.h"
 #include "hardware/sync.h"
@@ -22,12 +23,16 @@
 static uint8_t           dbg_buf[DBG_BUF_SIZE];
 static volatile uint32_t dbg_head = 0;     // producer index
 static volatile uint32_t dbg_tail = 0;     // consumer index (USB task only)
+static volatile uint32_t dbg_dropped = 0;  // bytes discarded while the ring was full
 
 // Producer side. Runs with IRQs disabled so thread- and IRQ-context printf
 // calls can't interleave, and so the USB-task consumer can't preempt a push.
 static void dbg_push_locked(uint8_t c) {
     uint32_t next = (dbg_head + 1u) & DBG_BUF_MASK;
-    if (next == dbg_tail) return;          // full: drop (debug output is best-effort)
+    if (next == dbg_tail) {                // full: drop (debug output is best-effort)
+        dbg_dropped++;                     // ...but make the gap self-evident later
+        return;
+    }
     dbg_buf[dbg_head] = c;
     dbg_head = next;
 }
@@ -63,6 +68,20 @@ void debug_cdc_task(void) {
     // then, output accumulates in the 8KB ring, so boot/pairing logs are still
     // delivered when the user opens the terminal late.
     if (!tud_cdc_connected()) return;
+
+    // If bytes were discarded while the ring was full, report the gap once the
+    // ring has room again, so a log gap is never silent. (We run in the USB
+    // timer IRQ; producers push with IRQs disabled, so guard the same way.)
+    if (dbg_dropped != 0 && ((dbg_head - dbg_tail) & DBG_BUF_MASK) < DBG_BUF_SIZE / 2u) {
+        char msg[48];
+        int n = snprintf(msg, sizeof(msg), "\r\n[log dropped %lu bytes]\r\n",
+                         (unsigned long) dbg_dropped);
+        uint32_t save = save_and_disable_interrupts();
+        dbg_dropped = 0;
+        for (int i = 0; i < n; i++) dbg_push_locked((uint8_t) msg[i]);
+        restore_interrupts(save);
+    }
+
     if (dbg_tail == dbg_head) return;
 
     // Bounded work per call: at most ONE 64-byte chunk per tick. This runs in
