@@ -43,6 +43,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <malloc.h>
 #include <string.h>
 #include "btstack.h"
 #include "btstack_avdtp_source.h"
@@ -1672,9 +1673,20 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
                     aacEncClose(&handleAAC);
                     handleAAC = NULL;
                 }
+                {   // heap telemetry: the mic decoder holds ~260KB, encoder
+                    // must fit in what's left (error 33 = AACENC_MEMORY_ERROR)
+                    struct mallinfo mi = mallinfo();
+                    printf("ENC heap before open: arena=%u inuse=%u\n",
+                           (unsigned) mi.arena, (unsigned) mi.uordblks);
+                }
                 if ((err = aacEncOpen(&handleAAC, 0x01, 2)) != AACENC_OK) {
                     printf("Couldn't open AAC-ELD encoder: %d\n", err);
                     break;
+                }
+                {
+                    struct mallinfo mi = mallinfo();
+                    printf("ENC heap after open: arena=%u inuse=%u\n",
+                           (unsigned) mi.arena, (unsigned) mi.uordblks);
                 }
                 if ((err = aacEncoder_SetParam(handleAAC, AACENC_AOT, 39)) != AACENC_OK) {
                     printf("Couldn't set AAC-ELD AOT: %d\n", err);

@@ -161,7 +161,11 @@ C_ALLOC_MEM2(TimeDataFlush, PCM_DEC, TIME_DATA_FLUSH_SIZE, (8))
 
 /* Take into consideration to make use of the WorkBufferCore[3/4] for decoder
  * configurations with more than 2 channels */
-C_ALLOC_MEM_OVERLAY(WorkBufferCore2, FIXP_DBL, ((8) * 1024), SECT_DATA_L2,
+/* USBPods: sized for (2) channels instead of (8) — the RP2350 has 520KB RAM
+ * total and the 8ch-sized work buffers alone exceeded the free heap. Streams
+ * with more than 2 channels are rejected in CAacDecoder_Init (aacdecoder.cpp,
+ * ascChannels guard patched to match). The mic stream is ELD mono. */
+C_ALLOC_MEM_OVERLAY(WorkBufferCore2, FIXP_DBL, ((2) * 1024), SECT_DATA_L2,
                     WORKBUFFER2_TAG)
 
 C_ALLOC_MEM_OVERLAY(WorkBufferCore6, SCHAR,
@@ -173,5 +177,6 @@ C_ALLOC_MEM_OVERLAY(WorkBufferCore1, CWorkBufferCore1, 1, SECT_DATA_L1,
                     WORKBUFFER1_TAG)
 
 /* double buffer size needed for de-/interleaving */
-C_ALLOC_MEM_OVERLAY(WorkBufferCore5, PCM_DEC, (8) * (1024 * 4) * 2,
+/* USBPods: (8) -> (2) channels, see WorkBufferCore2 note above. */
+C_ALLOC_MEM_OVERLAY(WorkBufferCore5, PCM_DEC, (2) * (1024 * 4) * 2,
                     SECT_DATA_EXTERN, WORKBUFFER5_TAG)

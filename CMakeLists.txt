@@ -64,6 +64,7 @@ add_executable(${PROJECT_NAME}
     src/btstack/btstack_avdtp_source.c
     src/btstack/btstack_hci.c
     src/btstack/btstack_aacp.c
+    src/btstack/aacp_mic_dec.c
     src/tinyusb/uac.c
     src/tinyusb/usb_descriptors.c
     src/tinyusb/debug_cdc.c
@@ -108,6 +109,9 @@ pico_enable_stdio_uart(PicoW_USB_BT_Audio 0)
 target_compile_definitions(PicoW_USB_BT_Audio PRIVATE
     CYW43_LWIP=0
     PICO_FLASH_ASSUME_CORE1_SAFE=1
+    # malloc failure must return NULL (fdk-aac handles it and we log it), not
+    # panic()+halt — an OOM halt froze USB enumeration and looked like a brick.
+    PICO_MALLOC_PANIC=0
 
     # must enable on rp2040 & 330kbps(MQ)
     #LDAC_SOFT_FLOAT=OFF

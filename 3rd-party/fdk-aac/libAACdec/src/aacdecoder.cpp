@@ -1710,7 +1710,9 @@ CAacDecoder_Init(HANDLE_AACDECODER self, const CSAudioSpecificConfig *asc,
   aacChannelsOffset = 0;
   aacChannelsOffsetIdx = 0;
   elementOffset = 0;
-  if ((ascChannels <= 0) || (ascChannels > (8)) ||
+  /* USBPods: max channels reduced 8 -> 2 to match the shrunken work buffers
+   * (aac_ram.cpp WorkBufferCore2/Core5) — see note there. */
+  if ((ascChannels <= 0) || (ascChannels > (2)) ||
       (asc->m_channelConfiguration > AACDEC_MAX_CH_CONF)) {
     return AAC_DEC_UNSUPPORTED_CHANNELCONFIG;
   }

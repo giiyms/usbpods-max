@@ -9,11 +9,16 @@
 #include <stdbool.h>
 
 // Slot queue constants
-#define AUDIO_SLOT_COUNT_SBC   24   // SBC: 128 samples/slot, 24*2.67ms = 64ms buffer
-#define AUDIO_SLOT_COUNT_AAC   16   // AAC-LC: 1024 samples/slot, 16*21.3ms = 341ms buffer
+// NOTE (hires-mic): the pool was 24 slots = 96KB of static RAM. The AAC-ELD
+// mic decoder needs ~260KB of heap and the encoder opens on top of that, so
+// the pool is trimmed to 8 slots (32KB) — HANDOFF risk #3. ELD (the AirPods
+// path) uses only 6 slots; SBC/AAC/LDAC sinks get a shallower queue (8) which
+// shortens their jitter buffer but keeps them functional.
+#define AUDIO_SLOT_COUNT_SBC   8    // SBC: 128 samples/slot, 8*2.67ms = 21ms buffer
+#define AUDIO_SLOT_COUNT_AAC   8    // AAC-LC: 1024 samples/slot, 8*21.3ms = 171ms buffer
 #define AUDIO_SLOT_COUNT_ELD   6    // AAC-ELD: 480 samples/slot, 6*10ms = 60ms buffer
-#define AUDIO_SLOT_COUNT_LDAC  16   // LDAC: 256 samples/slot, 16*5.3ms = 85ms buffer
-#define AUDIO_SLOT_COUNT_MAX   24   // pool size = max of all above
+#define AUDIO_SLOT_COUNT_LDAC  8    // LDAC: 256 samples/slot, 8*5.3ms = 43ms buffer
+#define AUDIO_SLOT_COUNT_MAX   8    // pool size = max of all above
 #define AUDIO_SLOT_MAX_SAMPLES 1024
 #define AUDIO_SLOT_MAX_INT16   (AUDIO_SLOT_MAX_SAMPLES * 2)  // stereo
 

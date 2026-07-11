@@ -4,6 +4,7 @@
 
 #include "btstack/btstack_avdtp_source.h"
 #include "btstack/btstack_hci.h"
+#include "btstack/aacp_mic_dec.h"
 
 #include <stdio.h>
 #include "pico/stdlib.h"
@@ -295,10 +296,23 @@ int main() {
     watchdog_enable(8000, true);
 
     uint16_t hbm = 0;
+    bool dec_init_done = false;
     while (1) {
         watchdog_update();  // feed the watchdog
         process_button_actions();
         tinyusb_control_task();
+
+        // Phase 3: open the AAC-ELD mic decoder from the MAIN LOOP (plain
+        // thread context), delayed to 8s after boot so USB has enumerated and
+        // a CDC terminal can attach first — if the init dies (suspected OOM
+        // panic: an earlier at-boot attempt froze before enumeration, showing
+        // "device descriptor request failed" on the host), the [DEC] heap and
+        // stage logs stream out live right up to the failure point.
+        // (Doing this from the BTstack callback context also hung on hardware.)
+        if (!dec_init_done && to_ms_since_boot(get_absolute_time()) > 8000) {
+            dec_init_done = true;
+            aacp_mic_dec_init();
+        }
 #ifndef FORENSICS_DISABLED
         // context heartbeat: main loop thread (every 10 iters = ~500ms)
         if (++hbm >= 10) { hbm = 0; printf("[HB-M]%lu\n", (unsigned long)(to_ms_since_boot(get_absolute_time())/1000)); }

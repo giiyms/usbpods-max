@@ -25,6 +25,7 @@
 
 #include "btstack.h"
 #include "btstack_aacp.h"
+#include "aacp_mic_dec.h"
 
 #define AACP_PSM              0x1001
 // Requested local MTU. NOTE: BTstack clamps this to l2cap_max_mtu() =
@@ -231,9 +232,12 @@ static void aacp_queue_init_sequence(void) {
 // ------------------------------------------------------------------
 // Phase 2: mic stream
 
-// 1 Hz statistics report. One short line per second — safe log volume.
+// 1 Hz statistics report. Two short lines per second — safe log volume.
+// Doubles as the stream stall watchdog (HANDOFF §3.6): no audio SDU for
+// >2000ms while capture is active → STOP + START to restart the stream.
 static void aacp_mic_stats_report(btstack_timer_source_t *ts) {
     uint32_t now = btstack_run_loop_get_time_ms();
+    bool stalled = mic_stats.sdu_total && (now - mic_stats.last_sdu_ms) > 2000;
     uint32_t avg = mic_stats.au_interval ? (mic_stats.au_bytes_interval / mic_stats.au_interval) : 0;
     printf("[MIC] sdu/s=%lu au/s=%lu au min/avg/max=%u/%lu/%u sdu_max=%u total_au=%lu%s%s\n",
            (unsigned long) mic_stats.sdu_interval,
@@ -244,10 +248,18 @@ static void aacp_mic_stats_report(btstack_timer_source_t *ts) {
            mic_stats.sdu_max,
            (unsigned long) mic_stats.au_total,
            mic_stats.demux_short ? " DEMUX_SHORT!" : "",
-           (mic_stats.sdu_total && (now - mic_stats.last_sdu_ms) > 2000) ? " STALLED>2s" : "");
+           stalled ? " STALLED>2s" : "");
+    aacp_mic_dec_report();
     mic_stats.sdu_interval = 0;
     mic_stats.au_interval = 0;
     mic_stats.au_bytes_interval = 0;
+
+    if (stalled && aacp_cid != 0 && aacp_connected) {
+        printf("[MIC] stall watchdog: restarting stream (STOP + START)\n");
+        aacp_tx_enqueue(aacp_mic_stop_bytes,  sizeof(aacp_mic_stop_bytes));
+        aacp_tx_enqueue(aacp_mic_start_bytes, sizeof(aacp_mic_start_bytes));
+        mic_stats.last_sdu_ms = now;   // give the restart a fresh 2s window
+    }
 
     btstack_run_loop_set_timer(ts, 1000);
     btstack_run_loop_add_timer(ts);
@@ -264,6 +276,13 @@ void aacp_mic_start(void) {
     memset(&mic_stats, 0, sizeof(mic_stats));
     mic_stats.au_min = 0xFFFF;
     mic_stats.last_sdu_ms = btstack_run_loop_get_time_ms();
+
+    // Phase 3: decoder was opened at boot (thread context — opening it here,
+    // in the BTstack callback, hung the system). Stats-only if boot init failed.
+    if (!aacp_mic_dec_ready()) {
+        printf("[MIC] WARNING: decoder unavailable, continuing stats-only\n");
+    }
+    aacp_mic_dec_reset_stats();
 
     printf("[MIC] sending START (hi-res mic, AAC-ELD mono 64kHz expected)\n");
     aacp_tx_enqueue(aacp_mic_start_bytes, sizeof(aacp_mic_start_bytes));
@@ -332,7 +351,8 @@ static void aacp_handle_audio_sdu(const uint8_t *sdu, uint16_t size) {
             mic_stats.demux_short++;
             break;
         }
-        // AU = sdu[start .. end)  — Phase 3 decoder hook goes here.
+        // Phase 3: decode the AU (stats gathered inside; PCM consumed in Phase 4).
+        aacp_mic_dec_decode(&sdu[start], au_len);
         mic_stats.au_total++;
         mic_stats.au_interval++;
         mic_stats.au_bytes_interval += au_len;

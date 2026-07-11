@@ -1,0 +1,190 @@
+//
+// Phase 3: AAC-ELD decoder for the AirPods hi-res mic stream — see header.
+//
+// Runs in the BTstack run loop (called per AU from the AACP L2CAP handler).
+// One mono 480-sample ELD frame decode is expected to take well under 1ms at
+// 250MHz; the decode-time stats below verify that assumption on hardware
+// (HANDOFF risk #2: Core 0 CPU headroom).
+//
+// LOGGING RULE: nothing is printed per AU. One "[DEC]" line per second.
+//
+
+#include <stdio.h>
+#include <string.h>
+#include <math.h>
+#include <malloc.h>
+
+#include <aacdecoder_lib.h>
+#include "pico/time.h"
+
+#include "aacp_mic_dec.h"
+
+// Fixed AudioSpecificConfig for the mic stream (HANDOFF §3.5, from librepods):
+// AAC-ELD (AOT 39), mono, 480 samples/frame, nominal 64 kHz.
+static UCHAR aacp_mic_asc[] = { 0xF8, 0xE6, 0x30, 0x00 };
+
+// librepods ELD_INBUF_MAX — AUs above this are malformed, don't feed them.
+#define MIC_AU_MAX 512
+
+// Decoded PCM scratch. Expected mono 480; sized x2 in case GetStreamInfo
+// reports stereo (then frameSize*channels must still fit).
+#define MIC_PCM_MAX_SAMPLES 960
+static INT_PCM mic_pcm[MIC_PCM_MAX_SAMPLES];
+
+static HANDLE_AACDECODER mic_dec = NULL;
+static bool mic_dec_streaminfo_logged = false;
+
+static struct {
+    // interval (reset each report)
+    uint32_t ok_interval;
+    uint32_t err_interval;
+    uint32_t dec_us_sum;
+    uint32_t dec_us_max;
+    uint64_t sq_sum;          // sum of sample^2 across the interval
+    uint32_t sq_samples;      // samples contributing to sq_sum
+    int32_t  peak;            // max |sample| this interval
+    // cumulative (reset on mic START)
+    uint32_t ok_total;
+    uint32_t err_total;
+} dstat;
+
+// NOTE: must be called from plain thread context (main(), at boot) — NOT from
+// a BTstack/async-context callback. aacDecoder_Open mallocs tens of KB in many
+// chunks; doing that from the async worker IRQ hung the system on hardware
+// (watchdog reset exactly at mic autostart, before a single log line escaped).
+// Same family as upstream's "FDK-AAC hangs on Core 1" note.
+// Print heap occupancy so we can see how close to OOM the decoder brings us
+// (HANDOFF risk #3). arena = heap claimed from the system so far, uordblks =
+// in use, fordblks = free inside the arena. Also reports the total heap region
+// from the linker (__end__ .. __StackLimit) and probes the largest contiguous
+// block malloc can actually deliver right now.
+extern char __StackLimit[];
+extern char end[];   // linker: end of .bss = start of heap
+
+static void dec_report_heap(const char *tag) {
+    struct mallinfo mi = mallinfo();
+    printf("[DEC] heap %s: region=%u arena=%u inuse=%u free=%u\n",
+           tag, (unsigned)(__StackLimit - end),
+           (unsigned) mi.arena, (unsigned) mi.uordblks, (unsigned) mi.fordblks);
+    // Probe (requires PICO_MALLOC_PANIC=0 so failure returns NULL):
+    static const uint32_t probes[] = { 256*1024, 128*1024, 64*1024, 32*1024 };
+    for (unsigned i = 0; i < sizeof(probes)/sizeof(probes[0]); i++) {
+        void *p = malloc(probes[i]);
+        printf("[DEC]   malloc(%luK) -> %s\n", (unsigned long)(probes[i]/1024), p ? "OK" : "NULL");
+        if (p) { free(p); break; }
+    }
+}
+
+bool aacp_mic_dec_init(void) {
+    if (mic_dec != NULL) return true;
+
+    dec_report_heap("before");
+    printf("[DEC] aacDecoder_Open ...\n");
+    mic_dec = aacDecoder_Open(TT_MP4_RAW, /* nrOfLayers */ 1);
+    if (mic_dec == NULL) {
+        printf("[DEC] aacDecoder_Open FAILED (out of heap?)\n");
+        return false;
+    }
+
+    printf("[DEC] aacDecoder_ConfigRaw ...\n");
+    UCHAR *conf[] = { aacp_mic_asc };
+    UINT   clen   = sizeof(aacp_mic_asc);
+    AAC_DECODER_ERROR err = aacDecoder_ConfigRaw(mic_dec, conf, &clen);
+    if (err != AAC_DEC_OK) {
+        printf("[DEC] aacDecoder_ConfigRaw FAILED: 0x%x\n", err);
+        aacDecoder_Close(mic_dec);
+        mic_dec = NULL;
+        return false;
+    }
+
+    dec_report_heap("after");
+    printf("[DEC] decoder ready (TT_MP4_RAW, ASC F8 E6 30 00)\n");
+    return true;
+}
+
+bool aacp_mic_dec_ready(void) {
+    return mic_dec != NULL;
+}
+
+void aacp_mic_dec_reset_stats(void) {
+    memset(&dstat, 0, sizeof(dstat));
+    mic_dec_streaminfo_logged = false;
+}
+
+bool aacp_mic_dec_decode(const uint8_t *au, uint16_t len) {
+    if (mic_dec == NULL || len == 0 || len > MIC_AU_MAX) {
+        dstat.err_interval++;
+        dstat.err_total++;
+        return false;
+    }
+
+    UCHAR *inb[]  = { (UCHAR *) au };
+    UINT   insz   = len;
+    UINT   valid  = len;
+    aacDecoder_Fill(mic_dec, inb, &insz, &valid);
+
+    uint32_t t0 = time_us_32();
+    AAC_DECODER_ERROR err = aacDecoder_DecodeFrame(mic_dec, mic_pcm, MIC_PCM_MAX_SAMPLES, 0);
+    uint32_t dt = time_us_32() - t0;
+
+    if (err != AAC_DEC_OK) {
+        // Phase 4 will insert 480 samples of silence here for PCM continuity.
+        dstat.err_interval++;
+        dstat.err_total++;
+        return false;
+    }
+
+    dstat.ok_interval++;
+    dstat.ok_total++;
+    dstat.dec_us_sum += dt;
+    if (dt > dstat.dec_us_max) dstat.dec_us_max = dt;
+
+    CStreamInfo *si = aacDecoder_GetStreamInfo(mic_dec);
+
+    // Answer HANDOFF §5-4 once per session: what does the decoder actually
+    // output — 64k or 48k, how many channels?
+    if (!mic_dec_streaminfo_logged && si != NULL) {
+        mic_dec_streaminfo_logged = true;
+        printf("[DEC] *** stream info: sampleRate=%d numChannels=%d frameSize=%d aot=%d ***\n",
+               (int) si->sampleRate, (int) si->numChannels, (int) si->frameSize, (int) si->aot);
+    }
+
+    // PCM level stats over the decoded frame.
+    int samples = (si != NULL) ? (int)(si->frameSize * si->numChannels) : 480;
+    if (samples > MIC_PCM_MAX_SAMPLES) samples = MIC_PCM_MAX_SAMPLES;
+    for (int i = 0; i < samples; i++) {
+        int32_t s = mic_pcm[i];
+        dstat.sq_sum += (uint64_t)((int64_t) s * s);
+        int32_t a = s < 0 ? -s : s;
+        if (a > dstat.peak) dstat.peak = a;
+    }
+    dstat.sq_samples += (uint32_t) samples;
+
+    return true;
+}
+
+void aacp_mic_dec_report(void) {
+    uint32_t ok = dstat.ok_interval;
+    uint32_t avg_us = ok ? dstat.dec_us_sum / ok : 0;
+    // RMS from the mean square; M33 has an FPU, sqrtf is cheap here (1 Hz).
+    uint32_t rms = 0;
+    if (dstat.sq_samples > 0) {
+        rms = (uint32_t) sqrtf((float)(dstat.sq_sum / dstat.sq_samples));
+    }
+    printf("[DEC] ok/s=%lu err=%lu(total %lu) dec_us avg/max=%lu/%lu rms=%lu peak=%ld\n",
+           (unsigned long) ok,
+           (unsigned long) dstat.err_interval,
+           (unsigned long) dstat.err_total,
+           (unsigned long) avg_us,
+           (unsigned long) dstat.dec_us_max,
+           (unsigned long) rms,
+           (long) dstat.peak);
+
+    dstat.ok_interval  = 0;
+    dstat.err_interval = 0;
+    dstat.dec_us_sum   = 0;
+    dstat.dec_us_max   = 0;
+    dstat.sq_sum       = 0;
+    dstat.sq_samples   = 0;
+    dstat.peak         = 0;
+}
