@@ -1,10 +1,12 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 han-um
 //
 // Debug logging over USB CDC.
 //
-// Routes stdio (printf) into a lock-free ring buffer, then drains it to the
-// composite device's CDC-ACM IN endpoint from the USB task context. This lets
-// us read firmware logs (e.g. AACP hex dumps) over the same USB cable as the
-// audio device, with no UART adapter. Debug aid only — not a user feature.
+// Routes stdio (printf) into an interrupt-safe ring buffer, then drains it to
+// the composite device's CDC-ACM IN endpoint from the USB task context. This
+// lets firmware logs be read over the same USB cable as the audio device,
+// with no UART adapter — useful when reporting issues.
 //
 
 #ifndef DEBUG_CDC_H

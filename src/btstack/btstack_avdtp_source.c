@@ -1225,13 +1225,9 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
             status = avdtp_source_discover_stream_endpoints(media_tracker.avdtp_cid);
             a2dp_is_connected_flag = true;
 
-            // Phase 1: open the AACP channel (PSM 0x1001) to the same AirPods,
-            // once A2DP signaling is up. Runs after a short settle delay.
-#ifndef AACP_DISABLED
+            // Open the AACP channel (PSM 0x1001) to the same AirPods once
+            // A2DP signaling is up. Runs after a short settle delay.
             aacp_connect(cur_active_device);
-#else
-            printf("[AACP] DISABLED at build time (isolation test) — skipping connect\n");
-#endif
 
             break;
         
@@ -2648,29 +2644,11 @@ static void avrcp_controller_packet_handler(uint8_t packet_type, uint16_t channe
     }  
 }
 
-#ifndef FORENSICS_DISABLED
-// context heartbeat: btstack run-loop timer (fires in the async_context that
-// runs BTstack; if these stop while bus-driven events keep logging, the run
-// loop's at-time machinery is starving)
-static btstack_timer_source_t hbb_timer;
-static void hbb_handler(btstack_timer_source_t *ts) {
-    printf("[HB-B]%lu\n", (unsigned long)(to_ms_since_boot(get_absolute_time())/1000));
-    btstack_run_loop_set_timer(ts, 1000);
-    btstack_run_loop_add_timer(ts);
-}
-#endif
-
 int btstack_main(int argc, const char * argv[]){
 
     l2cap_init();
     aacp_init();
     bt_hci_init();
-
-#ifndef FORENSICS_DISABLED
-    btstack_run_loop_set_timer_handler(&hbb_timer, hbb_handler);
-    btstack_run_loop_set_timer(&hbb_timer, 1000);
-    btstack_run_loop_add_timer(&hbb_timer);
-#endif
 
     // Initialize AVDTP Sink
     avdtp_source_init();
@@ -2692,7 +2670,7 @@ int btstack_main(int argc, const char * argv[]){
     sdp_init();
 
     // Device ID (DID) record advertising Apple as the vendor (0x004C). Several
-    // AACP features are gated on the host's DID VendorID being Apple (HANDOFF §3.7).
+    // AACP features are gated on the host's DID VendorID being Apple.
     static uint8_t sdp_device_id_service_buffer[100];
     memset(sdp_device_id_service_buffer, 0, sizeof(sdp_device_id_service_buffer));
     device_id_create_sdp_record(sdp_device_id_service_buffer, 0x10005,

@@ -1,10 +1,11 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 han-um
 //
-// Phase 3: AAC-ELD decoder for the AirPods hi-res mic stream.
+// AAC-ELD decoder for the AirPods hi-res mic stream.
 //
 // Wraps fdk-aac's aacDecoder_* API: TT_MP4_RAW transport, mono, configured
-// with the fixed 4-byte AudioSpecificConfig from librepods (HANDOFF §3.5).
-// Phase 3 decodes every AU and gathers statistics (error rate, PCM RMS/peak,
-// decode time) — the PCM itself is consumed by the USB mic path in Phase 4.
+// with the fixed 4-byte AudioSpecificConfig from librepods. Decoded PCM
+// lands in a lock-free ring consumed by the USB mic endpoint (uac.c).
 //
 
 #ifndef AACP_MIC_DEC_H
@@ -32,7 +33,7 @@ void aacp_mic_dec_report(void);
 // Reset cumulative statistics (called on mic START).
 void aacp_mic_dec_reset_stats(void);
 
-// --- Phase 4: decoded-PCM ring buffer (mono 16-bit @ 64 kHz) ---
+// --- Decoded-PCM ring buffer (mono 16-bit @ 64 kHz) ---
 // Single producer (decoder, BTstack context) / single consumer (USB IN
 // callback in the USB timer IRQ) — lock-free.
 

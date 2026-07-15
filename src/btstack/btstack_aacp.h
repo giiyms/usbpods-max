@@ -1,11 +1,12 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 han-um
+// Derived from librepods (https://github.com/librepods-org/librepods), GPL-3.0.
 //
-// AACP (Apple Accessory Protocol) channel for AirPods hi-res mic.
-// Phase 1: establish L2CAP PSM 0x1001, run the init handshake, and hex-dump
-// all received packets so we can confirm the AirPods accept our commands.
-// Phase 2: START/STOP the hi-res mic stream and demux type-0x58 audio SDUs
-// into AAC-ELD access units, with per-second RX statistics.
+// AACP (Apple Accessory Protocol) channel for the AirPods hi-res mic:
+// establishes L2CAP PSM 0x1001, runs the init handshake, START/STOPs the
+// mic stream, and demuxes type-0x58 audio SDUs into AAC-ELD access units.
 //
-// Ported from librepods (linux-rust) aacp.rs / aacp_audio.rs. See HANDOFF.md §3.
+// Ported from librepods (linux-rust branch) aacp.rs / aacp_audio.rs.
 //
 
 #ifndef BTSTACK_AACP_H
@@ -29,11 +30,11 @@ void aacp_disconnect(void);
 // True once the channel is open (handshake may still be in flight).
 bool aacp_is_connected(void);
 
-// --- Phase 2: hi-res mic stream ---
+// --- Hi-res mic stream ---
 
-// Send the mic START / STOP byte sequences (HANDOFF §3.3). No-ops if the
-// channel is not open. START also arms the per-second RX statistics report;
-// STOP stops it.
+// Send the mic START / STOP byte sequences. If the channel is not open yet,
+// START is remembered and fired once it is. START also arms the per-second
+// RX statistics report; STOP stops it.
 void aacp_mic_start(void);
 void aacp_mic_stop(void);
 

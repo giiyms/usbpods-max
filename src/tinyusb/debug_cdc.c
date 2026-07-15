@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 han-um
 //
 // Debug logging over USB CDC — see debug_cdc.h.
 //
@@ -57,13 +59,10 @@ static stdio_driver_t debug_cdc_driver = {
 };
 
 void debug_cdc_init(void) {
-#ifndef DEBUG_CDC_DISABLED
     stdio_set_driver_enabled(&debug_cdc_driver, true);
-#endif
 }
 
 void debug_cdc_task(void) {
-#ifndef DEBUG_CDC_DISABLED
     // Drain only while a terminal is actually attached (DTR asserted). Until
     // then, output accumulates in the 8KB ring, so boot/pairing logs are still
     // delivered when the user opens the terminal late.
@@ -99,5 +98,4 @@ void debug_cdc_task(void) {
     if (n == 0) return;
     tud_cdc_write(tmp, n);
     tud_cdc_write_flush();
-#endif
 }

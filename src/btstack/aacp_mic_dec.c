@@ -1,10 +1,13 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 han-um
+// The stream parameters (AudioSpecificConfig, frame layout) come from
+// librepods (https://github.com/librepods-org/librepods), GPL-3.0.
 //
-// Phase 3: AAC-ELD decoder for the AirPods hi-res mic stream — see header.
+// AAC-ELD decoder for the AirPods hi-res mic stream — see header.
 //
 // Runs in the BTstack run loop (called per AU from the AACP L2CAP handler).
-// One mono 480-sample ELD frame decode is expected to take well under 1ms at
-// 250MHz; the decode-time stats below verify that assumption on hardware
-// (HANDOFF risk #2: Core 0 CPU headroom).
+// One mono 480-sample ELD frame decodes in ~1.4ms at 250MHz (measured), well
+// inside the 7.5ms frame budget; the decode-time stats below keep watch.
 //
 // LOGGING RULE: nothing is printed per AU. One "[DEC]" line per second.
 //
@@ -19,7 +22,7 @@
 
 #include "aacp_mic_dec.h"
 
-// Fixed AudioSpecificConfig for the mic stream (HANDOFF §3.5, from librepods):
+// Fixed AudioSpecificConfig for the mic stream (from librepods):
 // AAC-ELD (AOT 39), mono, 480 samples/frame, nominal 64 kHz.
 static UCHAR aacp_mic_asc[] = { 0xF8, 0xE6, 0x30, 0x00 };
 
@@ -34,7 +37,7 @@ static INT_PCM mic_pcm[MIC_PCM_MAX_SAMPLES];
 static HANDLE_AACDECODER mic_dec = NULL;
 static bool mic_dec_streaminfo_logged = false;
 
-// --- Phase 4: decoded-PCM ring (mono 16-bit @ 64 kHz) ---
+// --- Decoded-PCM ring (mono 16-bit @ 64 kHz) ---
 // 8192 samples = 16KB = 128ms of audio; absorbs the SDU batching jitter
 // (AUs arrive in ~30ms bursts of 4). Lock-free SPSC: producer is the decoder
 // (BTstack context), consumer is the USB IN callback (USB timer IRQ).
@@ -91,15 +94,12 @@ static struct {
 } dstat;
 
 // NOTE: must be called from plain thread context (main(), at boot) — NOT from
-// a BTstack/async-context callback. aacDecoder_Open mallocs tens of KB in many
-// chunks; doing that from the async worker IRQ hung the system on hardware
-// (watchdog reset exactly at mic autostart, before a single log line escaped).
-// Same family as upstream's "FDK-AAC hangs on Core 1" note.
-// Print heap occupancy so we can see how close to OOM the decoder brings us
-// (HANDOFF risk #3). arena = heap claimed from the system so far, uordblks =
-// in use, fordblks = free inside the arena. Also reports the total heap region
-// from the linker (__end__ .. __StackLimit) and probes the largest contiguous
-// block malloc can actually deliver right now.
+// a BTstack/async-context callback. aacDecoder_Open mallocs ~258KB in many
+// chunks; doing that from the async worker context hung the system on
+// hardware (same family as upstream's "FDK-AAC hangs on Core 1" note).
+// Heap occupancy is logged at open so an out-of-memory failure is visible:
+// arena = heap claimed from the system, uordblks = in use, fordblks = free;
+// region = the total heap area from the linker (end .. __StackLimit).
 extern char __StackLimit[];
 extern char end[];   // linker: end of .bss = start of heap
 
@@ -108,13 +108,6 @@ static void dec_report_heap(const char *tag) {
     printf("[DEC] heap %s: region=%u arena=%u inuse=%u free=%u\n",
            tag, (unsigned)(__StackLimit - end),
            (unsigned) mi.arena, (unsigned) mi.uordblks, (unsigned) mi.fordblks);
-    // Probe (requires PICO_MALLOC_PANIC=0 so failure returns NULL):
-    static const uint32_t probes[] = { 256*1024, 128*1024, 64*1024, 32*1024 };
-    for (unsigned i = 0; i < sizeof(probes)/sizeof(probes[0]); i++) {
-        void *p = malloc(probes[i]);
-        printf("[DEC]   malloc(%luK) -> %s\n", (unsigned long)(probes[i]/1024), p ? "OK" : "NULL");
-        if (p) { free(p); break; }
-    }
 }
 
 bool aacp_mic_dec_init(void) {
@@ -171,7 +164,7 @@ bool aacp_mic_dec_decode(const uint8_t *au, uint16_t len) {
 
     if (err != AAC_DEC_OK) {
         // Keep PCM continuity for the USB stream: substitute one frame of
-        // silence for the failed AU (HANDOFF §3.6).
+        // silence for the failed AU.
         static const int16_t silence[480] = { 0 };
         mic_pcm_write(silence, 480);
         dstat.err_interval++;
@@ -186,8 +179,7 @@ bool aacp_mic_dec_decode(const uint8_t *au, uint16_t len) {
 
     CStreamInfo *si = aacDecoder_GetStreamInfo(mic_dec);
 
-    // Answer HANDOFF §5-4 once per session: what does the decoder actually
-    // output — 64k or 48k, how many channels?
+    // Log the decoder's reported stream parameters once per session.
     if (!mic_dec_streaminfo_logged && si != NULL) {
         mic_dec_streaminfo_logged = true;
         printf("[DEC] *** stream info: sampleRate=%d numChannels=%d frameSize=%d aot=%d ***\n",

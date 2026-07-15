@@ -11,8 +11,8 @@
 // Slot queue constants
 // NOTE (hires-mic): the pool was 24 slots = 96KB of static RAM. The AAC-ELD
 // mic decoder needs ~260KB of heap and the encoder opens on top of that, so
-// the pool is trimmed to 8 slots (32KB) — HANDOFF risk #3. ELD (the AirPods
-// path) uses only 6 slots; SBC/AAC/LDAC sinks get a shallower queue (8) which
+// the pool is trimmed to 8 slots (32KB) to make room. ELD (the AirPods path)
+// uses only 6 slots; SBC/AAC/LDAC sinks get a shallower queue (8) which
 // shortens their jitter buffer but keeps them functional.
 #define AUDIO_SLOT_COUNT_SBC   8    // SBC: 128 samples/slot, 8*2.67ms = 21ms buffer
 #define AUDIO_SLOT_COUNT_AAC   8    // AAC-LC: 1024 samples/slot, 8*21.3ms = 171ms buffer

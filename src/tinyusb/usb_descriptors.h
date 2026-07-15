@@ -34,7 +34,7 @@
  #define UAC2_ENTITY_SPK_INPUT_TERMINAL  0x01
  #define UAC2_ENTITY_SPK_FEATURE_UNIT    0x02
  #define UAC2_ENTITY_SPK_OUTPUT_TERMINAL 0x03
- // Microphone path (Phase 4: AirPods hi-res mic). The mic runs at 64 kHz
+ // Microphone path (AirPods hi-res mic). The mic runs at 64 kHz
  // (the AirPods deliver 133.3 AUs/s x 480 samples — librepods exposes its
  // virtual mic at 64000 Hz too) while the speaker runs at 48 kHz, so the mic
  // terminals reference their own fixed clock entity.

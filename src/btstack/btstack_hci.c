@@ -142,10 +142,11 @@ void get_link_keys(void){
     }
     printf("Stored First link key: \n");
 
+    // NOTE: don't print the key material itself — the log is user-visible
+    // over the USB CDC debug console (upstream dumped it to UART).
     if (gap_link_key_iterator_get_next(&it, addr, link_key, &type)){
         addr_str = bd_addr_to_str(addr);
-        printf("%s - type %u, key: ", addr_str, (int) type);
-        printf_hexdump(link_key, 16);
+        printf("%s - type %u\n", addr_str, (int) type);
         strncpy(device_addr_string, addr_str, sizeof(device_addr_string) - 1);
         sscanf_bd_addr(device_addr_string, device_addr_list[0]);
         have_key0 = true;
@@ -155,8 +156,7 @@ void get_link_keys(void){
 
     if (gap_link_key_iterator_get_next(&it, addr, link_key, &type)){
         addr_str = bd_addr_to_str(addr);
-        printf("%s - type %u, key: ", addr_str, (int) type);
-        printf_hexdump(link_key, 16);
+        printf("%s - type %u\n", addr_str, (int) type);
         strncpy(device_addr_string, addr_str, sizeof(device_addr_string) - 1);
         sscanf_bd_addr(device_addr_string, device_addr_list[1]);
         have_key1 = true;

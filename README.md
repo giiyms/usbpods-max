@@ -1,173 +1,133 @@
-# PicoW USB Audio to Bluetooth Adapter
-The Pico W USB Audio to Bluetooth Adapter transforms your Raspberry Pi Pico W into a high-quality audio streaming device.
-With Pico W Adapter, you can easily transmit audio wirelessly from your USB audio source to your Bluetooth headphones or speaker, enhancing your listening experience.
-Support LDAC and apple AAC-ELD for airpods!
+# USBPods 2-Way Audio — AirPods Hi-Res Microphone on a Pico 2 W
+
+A fork of [USBPods-Pico2W](https://github.com/wasdwasd0105/USBPods-Pico2W) that adds **2-way audio for AirPods**: high-quality playback *and* the AirPods' high-resolution microphone, at the same time, on any PC — no drivers, just a Raspberry Pi Pico 2 W acting as a USB sound card.
+
+Plug in the dongle and Windows (or any OS) sees a normal USB headset:
+
+- **Playback**: 48 kHz stereo, streamed to the AirPods as AAC-ELD over A2DP (upstream's work)
+- **Microphone**: 64 kHz mono, received from the AirPods' hi-res mic stream and decoded on the Pico (this fork)
+- Both run **simultaneously** — playback quality does not drop when the mic is in use
 
 
-<p align="center">
-<img alt="Logo" src="logo.png" width="200">
-</p>
+## Why this exists
 
-### Driver-Free Setup
-Setting up PicoW requires no driver or software installation. Simply plug the Pico W into your device's USB port, set your Bluetooth headphones or speakers to pairing mode, and an automatic connection will be made.
+When you use the AirPods microphone with a regular PC Bluetooth connection, the link has to switch from A2DP to the hands-free profile (HFP). That drops both directions to a narrow, telephone-grade codec — music playback and mic quality degrade badly. This is a Bluetooth profile limitation, not an AirPods one.
 
+Apple devices don't have this problem: iOS/macOS keep A2DP playback running and pull the microphone audio through a **proprietary Apple channel (AACP)** as an AAC-ELD stream. The [librepods](https://github.com/librepods-org/librepods) project reverse-engineered this, and its Linux (Rust) branch implemented full 2-way audio ([PR #655](https://github.com/librepods-org/librepods/pull/655)).
 
-### Multiple Bluetooth Codecs
-Pico W Bluetooth Adapter utilizes multiple codecs to deliver high-quality audio. 
-
-#### LDAC
-The input is 16-bit 48000Hz PCM audio, and it can steam LDAC audio at 303(Mobile Quality) on Pico W and 606(Standard Quality) Kbps/ 909 Kbps on Pico 2 W.
-
-#### AAC
-Only work on Pico 2 W. The input is 16-bit 48000Hz PCM audio, and use fdk-acc to encode the aac.
-
-#### AAC-ELD
-The secret makes AirPods have significant better sound quality on iOS/MacOS
+On Windows, that approach can't be replicated in software — the Bluetooth stack doesn't let user code open the required L2CAP channel alongside A2DP. So this project moves the whole problem into hardware: a Pico 2 W speaks Bluetooth to the AirPods (based on USBPods-Pico2W) and presents itself to the PC as a plain USB audio device. The OS needs no Bluetooth involvement at all.
 
 
-#### SBC
-Ready to use: There is a [sbc only project](https://github.com/wasdwasd0105/PicoW-usb2bt-audio-sbc/) that can learn how btstack and tinyusb work on Pico W
+## Scope and tested environment
 
+Please read this before using or building:
 
-
-### Video demo
-
-[![video demo](http://img.youtube.com/vi/Dilagi7l4xc/0.jpg)](http://www.youtube.com/watch?v=Dilagi7l4xc "")
+- **Board: Raspberry Pi Pico 2 W only.** The AAC-ELD mic decoder needs ~258 KB of heap on top of the encoder's ~122 KB; the whole audio path fits in the RP2350's 520 KB SRAM with roughly 55 KB to spare. It cannot fit on the original Pico W (RP2040, 264 KB), and no other board has been tried.
+- **Earbuds: tested with AirPods Pro 3 only.** The AACP byte sequences come from librepods and may work on other recent AirPods models, but none have been tested.
+- **Codecs: the AirPods path (AAC-ELD) is the only tested path.** Upstream also supports LDAC / AAC / SBC sinks; that code is still present but untested in this fork, and its jitter buffer was shortened to free RAM for the decoder (see *What changed*), so behavior may differ from upstream. The purpose of this fork is AirPods 2-way audio, nothing else.
+- Windows 11 was the only tested host OS. The device is a standard USB Audio Class 2 composite, so other OSes should work, but are untested.
 
 
 ## Installation
 
-Installing the Pico W USB Audio to Bluetooth Adapter firmware involves flashing a UF2 (USB Flashing Format) file onto your Raspberry Pi Pico. Follow these steps:
-
-1. **Download the UF2 file:** You can find the latest firmware for the PicoW USB Audio to Bluetooth Adapter at the [releases page](https://github.com/wasdwasd0105/PicoW-usb2bt-audio/releases) of the GitHub repository. Download the `.uf2` file from the latest release.
-
-2. **Connect the Pico to your computer:** First, ensure that your Pico is not connected to your computer. Then, hold down the 'BOOTSEL' button on the Pico while you plug it into your computer using a micro USB cable. It will appear on your computer as a mass storage device (like a USB flash drive).
-
-3. **Copy the UF2 file:** Simply drag and drop (or copy and paste) the downloaded UF2 file onto the Pico.
-
-4. **Reset the Pico:** Once the UF2 file has been copied onto the Pico, it will automatically reset and start running the new firmware.
-
+1. **Download the UF2 file** from this repository's releases page.
+2. **Enter bootloader mode**: hold the BOOTSEL button on the Pico while plugging it into USB. It appears as a mass-storage drive.
+3. **Copy the UF2 file** onto the drive. The Pico reboots into the firmware automatically.
 
 
 ## Usage
 
-Using the PicoW USB Audio to Bluetooth Adapter is a straightforward process. Here are the steps to follow:
+Pairing and buttons work as in upstream:
 
-1. **Connect your Pico W to your audio source device:** Use a USB cable to connect your Raspberry Pi Pico W to the device that you want to stream audio from.
+1. **Pair**: long-press BOOTSEL and release — the LED blinks fast. Put the AirPods case into pairing mode; the dongle connects automatically.
+   - If you flashed this fork over stock USBPods firmware, **re-pair once**: this fork advertises an Apple vendor ID (required for the mic protocol), and the AirPods treat it as a new device.
+2. **Playback**: select `TinyUSB BT` as the output device and play audio.
+3. **Microphone**: select `TinyUSB BT` as the recording device. The mic stream starts when an application opens the device and stops when it closes it. First capture after plug-in can take a couple of seconds (the firmware retries the mic start once automatically).
+4. **Reconnect**: short-press BOOTSEL when not streaming. Volume: single press = up, double press = down while connected.
+5. Two pairing slots (device A/B) and the LED status patterns are unchanged from upstream — see the [upstream README](https://github.com/wasdwasd0105/USBPods-Pico2W#usage) for details.
 
-2. **Set the audio output on your source device:** On your audio source device, go to your sound settings and change the audio output device to `TinyUSB BT`.
+### Troubleshooting
 
-3. **Pairing a new device:** To pair a new device, long press the 'BOOTSEL' button on the Pico W and release it the led light will blink fast. Then, put the new Bluetooth device into pairing mode. The Pico W will automatically connect to it.
-
-4. **Start playing audio:** Once everything is set up, you can start playing audio from your source device. The audio will be streamed to your Bluetooth device via the Pico W.
-
-5. **Reconnecting a device:** You can connect/reconnect the headphone by short pressing the 'BOOTSEL' button when it is not streaming audio (LED light not blinking)
-
-7. If you press the key for times but it has no response. It means it is crash. Please reconnect the USB. 
-
-8. starting at v0.8 the program can remember 2 devices. When connected to USB the led will blink for 2 times fast for device A and 3 times fast for device B. 
-
-     Double press the 'BOOTSEL' button can switch the device A or B and led will blink 2/3 times correspond to A/B.
-
-     After any bluetooth connection, switching device will not be available until reconnect the USB
-
-9. When connected: single press key-> volume+; double press key-> volume-
+- **Mic shows level 0 right after reflashing**: Windows' audio engine sometimes caches the old device state. Unplug and replug the dongle.
+- **Attach logs when reporting issues**: the dongle exposes a serial port (`Pico Debug Console` / a COM port) next to the audio device. Open it with any terminal program (e.g. PuTTY, 115200 baud, any settings) — the firmware buffers its boot log and streams live status lines (`[AACP]`, `[MIC]`, `[DEC]`) once a terminal attaches. Nothing is sent unless you open the port.
 
 
+## What changed from upstream
 
-## Green LED light Status Indicator
+New functionality:
 
-1. **Blinking Slow (1s):** When the Green LED light is blinking slow, it indicates that audio is currently streaming. Different LED light on time means different streaming mode:
+- `src/btstack/btstack_aacp.{c,h}` — **AACP channel** (L2CAP PSM 0x1001): init handshake, mic START/STOP, and demuxing of the type-0x58 audio SDUs into AAC-ELD access units. Ported from librepods.
+- `src/btstack/aacp_mic_dec.{c,h}` — **AAC-ELD mic decoder** (fdk-aac, mono 480-sample frames, 64 kHz) feeding a lock-free PCM ring.
+- `src/tinyusb/usb_descriptors.h`, `uac.c` — **USB microphone**: UAC2 input terminal + streaming interface + async isochronous IN endpoint, 16-bit mono 64 kHz with its own fixed clock entity (the speaker stays at 48 kHz). Opening/closing the recording stream (alt setting) is what starts/stops the AirPods mic.
+- `src/tinyusb/debug_cdc.{c,h}` — **debug console**: printf goes into an interrupt-safe ring buffer drained over a CDC-ACM serial port. Replaces UART logging (see below).
+- SDP now advertises an Apple Device ID record (vendor 0x004C) — several AACP features are gated on it.
 
-     | LED on time | codec |
-     |-------------|-------|
-     | 0.2s        | AAC   |
-     | 3s          | LDAC / AAC-ELD  |
-     | 1s          | SBC   |
+Fixes and behavioral changes (all of these bit us during development):
 
-2. **Blinking Fast (0.5s):** It means that the PicoW Adapter is in pairing mode.
+- **UART stdout removed.** The Pico SDK's UART printf blocks the calling context at 115200 baud; log bursts from the BTstack run loop or timer IRQs caused audio stalls and stutter. All logging now goes through the non-blocking CDC ring.
+- **Slot/MAC flash storage moved down one sector.** Upstream stored its pairing-slot data in the last flash sector, which is inside BTstack's link-key storage region — link-key writes could corrupt the slot MACs. Also falls back to the link-key address if a stored MAC looks erased.
+- **AVRCP Target SDP record handle collision fixed** (0x10002 was reused, so the record silently failed to register and absolute-volume control from the PC side never advertised).
+- **Duplicate HCI event-handler registration fixed** (two handlers shared one registration struct; only the last one ever ran).
+- **Button actions moved out of IRQ context.** BOOTSEL button handling called BTstack APIs from a timer IRQ, which can deadlock against the async-context lock; presses are now latched and executed from the main loop.
+- **A2DP jitter-buffer pool trimmed from 24 to 8 slots** (96 KB → 32 KB static RAM) and fdk-aac's decoder work buffers reduced from 8-channel to 2-channel size, to fit the mic decoder in RAM. The AirPods path uses 6 slots and is unaffected; other codecs get a shallower buffer.
+- **Watchdog period is 8 s** (upstream: 2 s) — the decoder allocates ~258 KB in many small chunks at init, and all long-term stability testing was done at this value.
 
-3. **On (Steady Light):** It means that the PicoW Adapter is on standby. Short-press the key to reconnect the last saved device.
 
+## Building from source
 
+Prerequisites: [pico-sdk](https://github.com/raspberrypi/pico-sdk) **2.1.1** (with `btstack`, `tinyusb`, `cyw43-driver`, `lwip`, `mbedtls` submodules), CMake, Ninja, an `arm-none-eabi` GCC toolchain (14.2.Rel1 was used), and picotool.
 
-## Compile & Debug
+### Required: patch the SDK's bundled TinyUSB first
 
-In order to compile the PicoW USB Audio to Bluetooth Adapter firmware from source code, you need to follow these steps:
+pico-sdk 2.1.1 bundles TinyUSB 0.18.0, which has a spurious `panic("ep %02X was already available")` in `lib/tinyusb/src/portable/raspberrypi/rp2040/rp2040_usb.c`. On the Pico 2 W (RP2350) this guard trips during normal A2DP streaming and halts the firmware — the symptom is a watchdog reboot loop / audio cutting out seconds after playback starts. This is [USBPods issue #29](https://github.com/wasdwasd0105/USBPods-Pico2W/issues/29); the upstream maintainer's confirmed workaround is to remove the panic (the code below it already clears the AVAIL bit safely).
 
-1. **Prepare your environment:** Use VS Code and Raspberry Pi Pico extension
+A ready-made patch is included in this repository:
 
-2. **Import the project on the Raspberry Pi Pico extension:** Import the project using General -> Import Project
+```sh
+git -C "$PICO_SDK_PATH/lib/tinyusb" apply /path/to/this/repo/patches/tinyusb-0.18-rp2350-panic-fix.patch
+```
 
-Choose Pico W or Pico 2 W using Switch Board
+**The firmware builds fine without this patch — and then crashes at runtime.** Don't skip it. (If you build with the Raspberry Pi Pico VS Code extension, the same patch must be applied to the extension's copy of the SDK.)
 
-Then you can Debug, Compile and Run the project on the Project tab
+### Build
 
-3. **Debug Serial input/output:** You can use uart to see the debug info. Connect the GPIO 0 and 1 as TX and RX. To enable BTstack's serial input, you can uncomment `HAVE_BTSTACK_STDIN` under btstack_config.h
+```sh
+export PICO_SDK_PATH=/path/to/pico-sdk
+cmake -S . -B build -G Ninja -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+cmake --build build
+```
+
+The output is `build/PicoW_USB_BT_Audio.uf2`. The board (`pico2_w`) is set in `CMakeLists.txt`. The `CMAKE_POLICY_VERSION_MINIMUM` flag is needed with CMake 4.x, which otherwise rejects the older minimum-version declarations in the bundled ldacBT.
 
 
 ## Acknowledgments
 
-This project wouldn't have been possible without the foundational work provided by the following projects:
+This fork is a thin layer on top of other people's much larger work:
 
-1. [tinyusb uac2_headset](https://github.com/hathach/tinyusb/tree/master/examples/device/uac2_headset): Tinyusb UAC2 headset demo
+- **[USBPods-Pico2W](https://github.com/wasdwasd0105/USBPods-Pico2W)** by wasdwasd0105 — the entire foundation. USB audio, BTstack integration, and especially AAC-ELD A2DP streaming to AirPods on a Pico already worked before this fork added a single line. The mic path also reuses its architecture throughout.
+- **[librepods](https://github.com/librepods-org/librepods)** — the reverse-engineered AACP protocol, and specifically [PR #655](https://github.com/librepods-org/librepods/pull/655) by LuanAdemi, which implemented hi-res microphone support on Linux. The AACP byte sequences, the 0x58 stream layout, and the decoder configuration in this fork are direct ports of that work.
+- Upstream's own acknowledgments (TinyUSB's `uac2_headset` example, BTstack's A2DP source demos) apply here unchanged.
 
-2. [a2dp_source_demo](https://github.com/bluekitchen/btstack/blob/master/example/a2dp_source_demo.c): The Advanced Audio Distribution Profile (A2DP) source demo provided by the BTstack.
+The upstream author found and fixed the TinyUSB 0.18 panic issue referenced above — this fork merely documents and bundles it.
 
-3. [avdtp_source_test.c](https://github.com/bluekitchen/btstack/tree/v1.5.4/test/pts): The Audio tests (avdtp_source_test.c and avdtp_sink_test) support the folowing audio codecs: SBC, AAC, aptX, and LDAC.
+
+## About this fork
+
+Most of the code in this fork was written with **Claude Code** (Anthropic's AI coding agent), directed and hardware-tested by me. I am not an experienced Bluetooth or embedded developer. Verification consisted of several days of iterative on-device testing during development, followed by about a week of daily use (simultaneous playback + mic) without failures — nothing more formal than that.
+
+Accordingly:
+
+- This fork is **not** submitted as a PR to upstream, to avoid pushing a large, AI-assisted, single-purpose change onto the upstream maintainer. If any part of it is useful upstream, feel free to take it.
+- **Please report issues on this repository, not upstream.** I will read everything, but this is a hobby project maintained on a best-effort basis — I may not be able to fix what you find. Logs from the debug console (see *Troubleshooting*) make a fix much more likely.
 
 
 ## License
 
-This project is licensed under the terms of the Apache License 2.0.
+This fork as a whole is distributed under the **GNU General Public License v3.0** ([LICENSE](LICENSE)), because the microphone implementation is derived from librepods (GPL-3.0).
 
-
-## Copyright
-
-### libldac: https://android.googlesource.com/platform/external/libldac
-```
- Copyright (C) 2013 - 2016 Sony Corporation
- 
-  Licensed under the Apache License, Version 2.0 (the "License");
-  you may not use this file except in compliance with the License.
-  You may obtain a copy of the License at
- 
-       http://www.apache.org/licenses/LICENSE-2.0
- 
-  Unless required by applicable law or agreed to in writing, software
-  distributed under the License is distributed on an "AS IS" BASIS,
-  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-  See the License for the specific language governing permissions and
-  limitations under the License.
-```
-
-NOTICE
-```
----------------
- Certification
----------------
-   Taking the certification process is required to use LDAC in your products.
-   For the detail of certification process, see the following URL:
-      https://www.sony.net/Products/LDAC/aosp/
-
-```
-
-### ldacBT: https://github.com/EHfive/ldacBT
-```
- Copyright 2018-2019 Huang-Huang Bao
-
-  Licensed under the Apache License, Version 2.0 (the "License");
-  you may not use this file except in compliance with the License.
-  You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-  Unless required by applicable law or agreed to in writing, software
-  distributed under the License is distributed on an "AS IS" BASIS,
-  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-  See the License for the specific language governing permissions and
-  limitations under the License.
-```
-
-
-### FDK AAC: https://github.com/mstorsjo/fdk-aac
+- Code inherited from upstream USBPods-Pico2W remains under the **Apache License 2.0** ([LICENSE.Apache-2.0](LICENSE.Apache-2.0)); original file headers are retained.
+- Third-party components keep their own licenses:
+  - [libldac](https://android.googlesource.com/platform/external/libldac) — Apache-2.0, © Sony Corporation. Note Sony's [LDAC certification requirement](https://www.sony.net/Products/LDAC/aosp/) for products.
+  - [ldacBT](https://github.com/EHfive/ldacBT) — Apache-2.0, © Huang-Huang Bao
+  - [FDK AAC](https://github.com/mstorsjo/fdk-aac) — Software License for the Fraunhofer FDK AAC Codec Library for Android (see `3rd-party/fdk-aac/NOTICE`)
+  - TinyUSB (MIT) and BTstack (BlueKitchen license) are used via the Raspberry Pi Pico SDK.

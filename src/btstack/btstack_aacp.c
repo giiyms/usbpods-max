@@ -1,23 +1,21 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 han-um
+// Derived from librepods (https://github.com/librepods-org/librepods), GPL-3.0.
 //
-// AACP (Apple Accessory Protocol) channel — Phase 1 + Phase 2.
+// AACP (Apple Accessory Protocol) channel — the AirPods hi-res mic transport.
 //
-// Phase 1: establishes an outgoing L2CAP channel on PSM 0x1001 over the
-// existing ACL link to the AirPods, then runs the fixed init sequence.
-// Success criterion (HANDOFF §7 Phase 1): AACP control packets such as
-// BATTERY_INFO (0x04) arrive. VERIFIED on hardware 2026-07-11.
+// Opens an outgoing L2CAP channel on PSM 0x1001 over the existing ACL link,
+// runs the fixed init sequence (handshake / SET_FEATURE_FLAGS /
+// REQUEST_NOTIFICATIONS), then drives the microphone stream: a START opcode
+// makes the AirPods push type-0x58 SDUs carrying AAC-ELD access units, which
+// are demuxed here and handed to the decoder (aacp_mic_dec.c).
 //
-// Phase 2: sends the mic START byte sequence (temporary trigger: 10s after
-// the first control packet), demuxes type-0x58 audio SDUs into AAC-ELD
-// access units (port of librepods aacp_audio.rs), and reports per-second RX
-// statistics. Success criterion (HANDOFF §7 Phase 2): SDU/AU counts and AU
-// size stats in the log (~133 AU/s expected at 480/64000).
+// All byte sequences and the 0x58 demux layout are ports of librepods
+// (linux-rust branch, GPL-3.0) — see that project's aacp_audio.rs.
 //
-// Byte sequences are taken verbatim from librepods (linux-rust) — HANDOFF §3.
-//
-// LOGGING RULE (hard-learned): this file's handlers run in the BTstack run
-// loop. No per-packet logging on the audio path, no bulk hexdumps outside
-// FORENSICS builds — blocking log bursts here have stalled A2DP before.
-// Audio-path telemetry is aggregated and printed at most once per second.
+// LOGGING RULE: these handlers run in the BTstack run loop, where a burst of
+// blocking log output has caused A2DP underruns. No per-packet logging on the
+// audio path; telemetry is aggregated and printed at most once per second.
 //
 
 #include <stdio.h>
@@ -28,23 +26,23 @@
 #include "aacp_mic_dec.h"
 
 #define AACP_PSM              0x1001
-// Requested local MTU. NOTE: BTstack clamps this to l2cap_max_mtu() =
+// Requested local MTU. BTstack clamps this to l2cap_max_mtu() =
 // HCI_ACL_PAYLOAD_SIZE - 4 (currently 1691), which is what actually gets
-// advertised. 0x58 audio SDUs can exceed 1KB (HANDOFF §3.1); if Phase 2 shows
-// SDUs larger than the effective MTU being dropped, raise HCI_ACL_PAYLOAD_SIZE
-// in btstack_config.h instead of this constant.
+// advertised. Measured audio SDUs top out around 354 bytes, well under that;
+// if larger SDUs ever get dropped, raise HCI_ACL_PAYLOAD_SIZE in
+// btstack_config.h rather than this constant.
 #define AACP_LOCAL_MTU        4096
 #define AACP_CONNECT_DELAY_MS 1500   // let A2DP settle before opening the channel
 #define AACP_RETRY_DELAY_MS   3000   // delay between connect retries
 #define AACP_MAX_ATTEMPTS     3      // initial attempt + retries per A2DP session
 
-// Mic lifecycle (HANDOFF §5-1): the ONLY trigger is the USB alt setting —
-// main.c calls aacp_mic_start()/aacp_mic_stop() when the host opens/closes
-// the recording stream. If the host opens the mic before the AACP channel is
-// up (or the channel drops mid-capture), the start is remembered and fired
-// as soon as the first control packet confirms the channel.
+// Mic lifecycle: the ONLY trigger is the USB alt setting — main.c calls
+// aacp_mic_start()/aacp_mic_stop() when the host opens/closes the recording
+// stream. If the host opens the mic before the AACP channel is up (or the
+// channel drops mid-capture), the start is remembered and fired as soon as
+// the first control packet confirms the channel.
 
-// --- Fixed init byte sequences (HANDOFF §3.2) ---
+// --- Fixed init byte sequences (verbatim from librepods) ---
 
 // 1) Handshake: 16 bytes sent raw (the 04 00 04 00 data header is part of it).
 static const uint8_t aacp_handshake[] = {
@@ -64,7 +62,7 @@ static const uint8_t aacp_request_notifications[] = {
     0xFF, 0xFF, 0xFF, 0xFF
 };
 
-// --- Mic stream control byte sequences (HANDOFF §3.3, verbatim) ---
+// --- Mic stream control byte sequences (verbatim from librepods) ---
 
 static const uint8_t aacp_mic_start_bytes[] = {
     0x04, 0x00, 0x04, 0x00, 0x58, 0x00, 0x00, 0x00,
@@ -97,7 +95,7 @@ static bool       aacp_got_control = false; // first valid AACP control packet s
 
 static btstack_timer_source_t aacp_connect_timer;
 
-// --- Phase 2 mic stream state ---
+// --- Mic stream state ---
 
 // type-0x58 audio SDU layout: 22-byte header, then N x [ts:u32 LE][len:u8][au].
 #define TYPE58_HEADER_LEN 22
@@ -232,11 +230,11 @@ static void aacp_queue_init_sequence(void) {
 }
 
 // ------------------------------------------------------------------
-// Phase 2: mic stream
+// Mic stream
 
 // 1 Hz statistics report. Two short lines per second — safe log volume.
-// Doubles as the stream stall watchdog (HANDOFF §3.6): no audio SDU for
-// >2000ms while capture is active → STOP + START to restart the stream.
+// Doubles as the stream stall watchdog: no audio SDU for >2000ms while
+// capture is active → STOP + START to restart the stream.
 static void aacp_mic_stats_report(btstack_timer_source_t *ts) {
     uint32_t now = btstack_run_loop_get_time_ms();
     // Covers BOTH stall cases: stream died mid-capture AND "START ignored"
@@ -285,8 +283,8 @@ void aacp_mic_start(void) {
     mic_stats.au_min = 0xFFFF;
     mic_stats.last_sdu_ms = btstack_run_loop_get_time_ms();
 
-    // Phase 3: decoder was opened at boot (thread context — opening it here,
-    // in the BTstack callback, hung the system). Stats-only if boot init failed.
+    // The decoder was opened at boot (thread context — opening it here, in
+    // the BTstack callback, hung the system). Stats-only if boot init failed.
     if (!aacp_mic_dec_ready()) {
         printf("[MIC] WARNING: decoder unavailable, continuing stats-only\n");
     }
@@ -335,8 +333,8 @@ static bool aacp_is_audio_sdu(const uint8_t *sdu, uint16_t size) {
 }
 
 // Walk the sub-frames of one 0x58 audio SDU: 22-byte header, then
-// N x [timestamp:u32 LE][au_len:u8][AU bytes]. Phase 2 only collects size
-// statistics; Phase 3 will hand each AU to the AAC-ELD decoder here.
+// N x [timestamp:u32 LE][au_len:u8][AU bytes]. Each AU goes to the AAC-ELD
+// decoder; size statistics feed the 1 Hz report.
 static void aacp_handle_audio_sdu(const uint8_t *sdu, uint16_t size) {
     mic_stats.sdu_total++;
     mic_stats.sdu_interval++;
@@ -352,7 +350,6 @@ static void aacp_handle_audio_sdu(const uint8_t *sdu, uint16_t size) {
             mic_stats.demux_short++;
             break;
         }
-        // Phase 3: decode the AU (stats gathered inside; PCM consumed in Phase 4).
         aacp_mic_dec_decode(&sdu[start], au_len);
         mic_stats.au_total++;
         mic_stats.au_interval++;
@@ -410,12 +407,14 @@ static void aacp_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *
                 break;
             }
 
-            // Control packets: 04 00 04 00 header + u16le opcode (HANDOFF §3.2).
+            // Control packets: 04 00 04 00 data header + u16le opcode.
+            // Not logged per packet — the AirPods send occasional multi-
+            // hundred-byte info bursts that must not stall the run loop.
             if (size >= 6 && packet[0] == 0x04 && packet[1] == 0x00 &&
                 packet[2] == 0x04 && packet[3] == 0x00) {
                 if (!aacp_got_control) {
                     aacp_got_control = true;
-                    printf("[AACP] *** control channel confirmed (first packet) ***\n");
+                    printf("[AACP] control channel confirmed (first packet)\n");
                     // Host already holds the mic open (USB alt 1)? Fire the
                     // deferred START now that the channel is confirmed.
                     if (aacp_mic_want && !aacp_mic_running) {
@@ -423,24 +422,7 @@ static void aacp_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *
                         aacp_mic_start();
                     }
                 }
-#ifndef FORENSICS_DISABLED
-                uint16_t opcode = little_endian_read_16(packet, 4);
-                const char *name = "";
-                switch (opcode) {
-                    case 0x0004: name = " (BATTERY_INFO)"; break;
-                    case 0x001D: name = " (INFORMATION)";  break;
-                    default: break;
-                }
-                printf("[AACP] RX %u bytes, opcode 0x%04x%s:\n", size, opcode, name);
-#endif
-            } else {
-#ifndef FORENSICS_DISABLED
-                printf("[AACP] RX %u bytes (no data header):\n", size);
-#endif
             }
-#ifndef FORENSICS_DISABLED
-            printf_hexdump(packet, size);
-#endif
             break;
 
         default:

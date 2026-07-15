@@ -61,9 +61,8 @@ extern "C" {
 #endif
 
 // TinyUSB internal logging. MUST stay 0: TU_LOG prints run inside the USB
-// timer IRQ and block on the 115200-baud UART for milliseconds; with the CDC
-// port added, the extra control traffic (port opens) plus these stalls made
-// the host drop the device off the bus (seen as COM port appear/vanish loops).
+// timer IRQ, and their volume during enumeration stalled the device enough
+// that the host dropped it off the bus (COM port appear/vanish loops).
 #ifndef CFG_TUSB_DEBUG
 #define CFG_TUSB_DEBUG        0
 #endif

@@ -205,21 +205,8 @@ bool usb_timer_callback(repeating_timer_t *rt){
 bool bootsel_timer_callback(repeating_timer_t *rt) {
     (void)rt;
     check_bootsel_state();
-#ifndef FORENSICS_DISABLED
-    // context heartbeat: alarm-pool timer IRQ (every 50 calls = ~1s)
-    // NOTE: printf here goes out over UART too, which BLOCKS (~1ms at 115200)
-    // inside the alarm IRQ and delays the 500us USB timer — suspected cause of
-    // periodic audio stutter. Compile out with -DFORENSICS_DISABLED=1.
-    static uint16_t hba = 0;
-    if (++hba >= 50) { hba = 0; printf("[HB-A]%lu\n", (unsigned long)(to_ms_since_boot(get_absolute_time())/1000)); }
-#endif
     return true;    // keep repeating
 }
-
-// Watchdog: auto-reset if system gets stuck (e.g. NOCP fault from CPACR corruption)
-// void isr_hardfault(void) {
-//     watchdog_reboot(0, 0, 0);  // immediate reset
-// }
 
 int main() {
 
@@ -236,9 +223,9 @@ int main() {
 
     flash_safe_execute_core_init();
 
-    // Crash forensics: distinguish watchdog resets from clean power-on boots
+    // Distinguish watchdog resets from clean power-on boots in the debug log.
     if (watchdog_caused_reboot()) {
-        printf("!!! BOOT REASON: WATCHDOG RESET (previous run hung >2s)\n");
+        printf("!!! BOOT REASON: WATCHDOG RESET (previous run hung)\n");
     } else {
         printf("boot reason: normal power-on/reset\n");
     }
@@ -277,35 +264,27 @@ int main() {
     static repeating_timer_t usb_timer;
     // NEGATIVE interval (hard period): fire every 500us measured from the
     // previous START, so tinyusb_task() runs at a steady cadence regardless of
-    // how long each call takes. USB audio is isochronous — the OUT endpoint must
-    // be serviced on a fixed rhythm or samples drift/underrun. This is what the
-    // proven-stable upstream release uses.
-    //
-    // (History: this was briefly changed to +500 while chasing a streaming
-    // crash, on the theory that overrun "catch-up" starved other contexts. That
-    // crash was actually the TinyUSB 0.18 endpoint panic — see the SDK patch in
-    // tools/sdk-patches — not the timer. The +500 form instead let the effective
-    // USB service period stretch under load, causing periodic audio stutter and
-    // a stall after ~30s. Reverted to match upstream.)
+    // how long each call takes. USB audio is isochronous — the OUT endpoint
+    // must be serviced on a fixed rhythm or samples drift/underrun.
     add_repeating_timer_us(-500, usb_timer_callback, NULL, &usb_timer);
 
     static repeating_timer_t bootsel_timer;
     add_repeating_timer_us(20000, bootsel_timer_callback, NULL, &bootsel_timer);
 
-    // Enable watchdog — auto-resets if main loop stops feeding it.
-    // TEMP (debug): extended 2s -> 8s to observe hang behavior; restore later.
+    // Enable watchdog — auto-resets if the main loop stops feeding it.
+    // 8s (upstream used 2s): the mic decoder init below allocates ~258KB in
+    // many chunks from this loop, and long-term testing was done at this value.
     watchdog_enable(8000, true);
 
-    uint16_t hbm = 0;
     bool dec_init_done = false;
     while (1) {
         watchdog_update();  // feed the watchdog
         process_button_actions();
         tinyusb_control_task();
 
-        // Phase 4: mic lifecycle. USB alt-setting callbacks (IRQ context)
-        // latch requests; execute them here with the async-context lock —
-        // same pattern as the buttons above.
+        // Mic lifecycle: USB alt-setting callbacks (IRQ context) may not call
+        // BTstack directly, so they only latch requests; execute them here
+        // with the async-context lock — same pattern as the buttons above.
         if (usb_mic_take_start_request()) {
             async_context_t *ctx = cyw43_arch_async_context();
             async_context_acquire_lock_blocking(ctx);
@@ -319,21 +298,14 @@ int main() {
             async_context_release_lock(ctx);
         }
 
-        // Phase 3: open the AAC-ELD mic decoder from the MAIN LOOP (plain
-        // thread context), delayed to 8s after boot so USB has enumerated and
-        // a CDC terminal can attach first — if the init dies (suspected OOM
-        // panic: an earlier at-boot attempt froze before enumeration, showing
-        // "device descriptor request failed" on the host), the [DEC] heap and
-        // stage logs stream out live right up to the failure point.
-        // (Doing this from the BTstack callback context also hung on hardware.)
+        // Open the AAC-ELD mic decoder from the main loop (plain thread
+        // context — opening it from a BTstack callback hung on hardware),
+        // delayed until well after boot so the ~258KB of decoder mallocs
+        // can't stall USB enumeration.
         if (!dec_init_done && to_ms_since_boot(get_absolute_time()) > 8000) {
             dec_init_done = true;
             aacp_mic_dec_init();
         }
-#ifndef FORENSICS_DISABLED
-        // context heartbeat: main loop thread (every 10 iters = ~500ms)
-        if (++hbm >= 10) { hbm = 0; printf("[HB-M]%lu\n", (unsigned long)(to_ms_since_boot(get_absolute_time())/1000)); }
-#endif
         sleep_ms(50);
     }
 
