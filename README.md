@@ -37,6 +37,7 @@ Most of the code in this fork was written with **Claude Code** (Anthropic's AI c
 
 Accordingly:
 
+- The upstream-bug diagnoses listed in *What changed from upstream* also came out of that AI-assisted debugging, not my own analysis. Each fix was verified on hardware (symptom present before, gone after), and the commit messages record the evidence in detail — treat those, not me, as the technical reference.
 - This fork is **not** submitted as a PR to upstream, to avoid pushing a large, AI-assisted, single-purpose change onto the upstream maintainer. If any part of it is useful upstream, feel free to take it.
 - **Please report issues on this repository, not upstream.** I will read everything, but this is a hobby project maintained on a best-effort basis — I may not be able to fix what you find. Logs from the debug console (see *Troubleshooting*) make a fix much more likely.
 
