@@ -13,9 +13,32 @@ Plug in the dongle and Windows (or any OS) sees a normal USB headset:
 
 When you use the AirPods microphone with a regular PC Bluetooth connection, the link has to switch from A2DP to the hands-free profile (HFP). That drops both directions to a narrow, telephone-grade codec — music playback and mic quality degrade badly. This is a Bluetooth profile limitation, not an AirPods one.
 
-Apple devices don't have this problem: iOS/macOS keep A2DP playback running and pull the microphone audio through a **proprietary Apple channel (AACP)** as an AAC-ELD stream. The [librepods](https://github.com/librepods-org/librepods) project reverse-engineered this, and its Linux (Rust) branch implemented full 2-way audio ([PR #655](https://github.com/librepods-org/librepods/pull/655)).
+iOS devices don't have this problem: iOS keeps A2DP playback running and pulls the microphone audio through a **proprietary Apple channel (AACP)** as an AAC-ELD stream. The [librepods](https://github.com/librepods-org/librepods) project reverse-engineered this, and its Linux (Rust) branch implemented full 2-way audio ([PR #655](https://github.com/librepods-org/librepods/pull/655)).
 
 On Windows, that approach can't be replicated in software — the Bluetooth stack doesn't let user code open the required L2CAP channel alongside A2DP. So this project moves the whole problem into hardware: a Pico 2 W speaks Bluetooth to the AirPods (based on USBPods-Pico2W) and presents itself to the PC as a plain USB audio device. The OS needs no Bluetooth involvement at all.
+
+
+## Acknowledgments
+
+This fork is an experiment in splicing two existing projects together — nearly all of the hard work happened elsewhere:
+
+- **[USBPods-Pico2W](https://github.com/wasdwasd0105/USBPods-Pico2W)** by wasdwasd0105 — the entire foundation. USB audio, BTstack integration, and especially AAC-ELD A2DP streaming to AirPods on a Pico already worked before this fork added a single line. The mic path also reuses its architecture throughout.
+- **[librepods](https://github.com/librepods-org/librepods)** — the AACP protocol. Specifically [PR #655](https://github.com/librepods-org/librepods/pull/655) by LuanAdemi, which implemented hi-res microphone support on Linux and is what this fork ports (the AACP byte sequences, the 0x58 stream layout, and the decoder configuration are direct translations of it). That PR in turn stands on the librepods community's accumulated reverse-engineering of the AirPods protocols — thanks to that whole community.
+- Upstream's own acknowledgments (TinyUSB's `uac2_headset` example, BTstack's A2DP source demos) apply here unchanged.
+
+The upstream author also found and fixed the TinyUSB 0.18 panic issue documented in the build section below — this fork merely bundles the fix.
+
+
+## About this fork
+
+This is an **experimental project**: two proven projects glued together to see if AirPods 2-way audio could work on a PC. It turned out to work well — but treat it as an experiment, not a product.
+
+Most of the code in this fork was written with **Claude Code** (Anthropic's AI coding agent), directed and hardware-tested by me. I am not an experienced Bluetooth or embedded developer. Verification consisted of several days of iterative on-device testing during development, followed by about a week of daily use (simultaneous playback + mic) without failures — nothing more formal than that.
+
+Accordingly:
+
+- This fork is **not** submitted as a PR to upstream, to avoid pushing a large, AI-assisted, single-purpose change onto the upstream maintainer. If any part of it is useful upstream, feel free to take it.
+- **Please report issues on this repository, not upstream.** I will read everything, but this is a hobby project maintained on a best-effort basis — I may not be able to fix what you find. Logs from the debug console (see *Troubleshooting*) make a fix much more likely.
 
 
 ## Scope and tested environment
@@ -98,27 +121,6 @@ cmake --build build
 ```
 
 The output is `build/PicoW_USB_BT_Audio.uf2`. The board (`pico2_w`) is set in `CMakeLists.txt`. The `CMAKE_POLICY_VERSION_MINIMUM` flag is needed with CMake 4.x, which otherwise rejects the older minimum-version declarations in the bundled ldacBT.
-
-
-## Acknowledgments
-
-This fork is a thin layer on top of other people's much larger work:
-
-- **[USBPods-Pico2W](https://github.com/wasdwasd0105/USBPods-Pico2W)** by wasdwasd0105 — the entire foundation. USB audio, BTstack integration, and especially AAC-ELD A2DP streaming to AirPods on a Pico already worked before this fork added a single line. The mic path also reuses its architecture throughout.
-- **[librepods](https://github.com/librepods-org/librepods)** — the reverse-engineered AACP protocol, and specifically [PR #655](https://github.com/librepods-org/librepods/pull/655) by LuanAdemi, which implemented hi-res microphone support on Linux. The AACP byte sequences, the 0x58 stream layout, and the decoder configuration in this fork are direct ports of that work.
-- Upstream's own acknowledgments (TinyUSB's `uac2_headset` example, BTstack's A2DP source demos) apply here unchanged.
-
-The upstream author found and fixed the TinyUSB 0.18 panic issue referenced above — this fork merely documents and bundles it.
-
-
-## About this fork
-
-Most of the code in this fork was written with **Claude Code** (Anthropic's AI coding agent), directed and hardware-tested by me. I am not an experienced Bluetooth or embedded developer. Verification consisted of several days of iterative on-device testing during development, followed by about a week of daily use (simultaneous playback + mic) without failures — nothing more formal than that.
-
-Accordingly:
-
-- This fork is **not** submitted as a PR to upstream, to avoid pushing a large, AI-assisted, single-purpose change onto the upstream maintainer. If any part of it is useful upstream, feel free to take it.
-- **Please report issues on this repository, not upstream.** I will read everything, but this is a hobby project maintained on a best-effort basis — I may not be able to fix what you find. Logs from the debug console (see *Troubleshooting*) make a fix much more likely.
 
 
 ## License
