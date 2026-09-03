@@ -55,6 +55,7 @@
 #include "classic/device_id_server.h"
 
 #include "../pico_w_led.h"
+#include "../hid_consumer.h"
 
 #define HAVE_AAC_FDK
 
@@ -494,7 +495,47 @@ static btstack_timer_source_t suspend_recovery_timer;
 static bool suspend_recovery_pending = false;
 #define SUSPEND_RECOVERY_TIMEOUT_MS 3000
 
+// Auto-reclaim after the iPhone (or anyone) drops our AVDTP signaling.
+// Explicit disconnect / pair-scan sets reclaim_hold so we do not fight the user.
+#define RECLAIM_DELAY_MS  400
+#define RECLAIM_RETRY_MS  2000
+#define RECLAIM_MAX_TRIES 30
+static btstack_timer_source_t reclaim_timer;
+static bool    reclaim_hold  = false;
+static uint8_t reclaim_tries = 0;
+
 static void a2dp_demo_timer_start(a2dp_media_sending_context_t * context);
+
+static void reclaim_timer_handler(btstack_timer_source_t *timer) {
+    (void)timer;
+    if (reclaim_hold || a2dp_is_connected_flag) return;
+    if (reclaim_tries >= RECLAIM_MAX_TRIES) {
+        printf("[A2DP] reclaim gave up after %u tries\n", (unsigned) reclaim_tries);
+        return;
+    }
+    reclaim_tries++;
+    printf("[A2DP] reclaim try %u/%u\n", (unsigned) reclaim_tries, RECLAIM_MAX_TRIES);
+    avdtp_source_connect((uint8_t *) get_device_addr(), &media_tracker.avdtp_cid);
+    btstack_run_loop_set_timer(&reclaim_timer, RECLAIM_RETRY_MS);
+    btstack_run_loop_add_timer(&reclaim_timer);
+}
+
+void avdtp_reclaim_hold_set(bool hold) {
+    reclaim_hold = hold;
+    if (hold) {
+        reclaim_tries = 0;
+        btstack_run_loop_remove_timer(&reclaim_timer);
+    }
+}
+
+static void reclaim_arm_after_release(void) {
+    if (reclaim_hold) return;
+    reclaim_tries = 0;
+    btstack_run_loop_remove_timer(&reclaim_timer);
+    btstack_run_loop_set_timer_handler(&reclaim_timer, reclaim_timer_handler);
+    btstack_run_loop_set_timer(&reclaim_timer, RECLAIM_DELAY_MS);
+    btstack_run_loop_add_timer(&reclaim_timer);
+}
 
 static void suspend_recovery_handler(btstack_timer_source_t *timer) {
     (void)timer;
@@ -913,39 +954,15 @@ static void avdtp_audio_timeout_handler(btstack_timer_source_t * timer){
                 send_wait_ticks = 0;
                 fail_count++;
 
-                // AAC-ELD: suspend immediately on first failure to reset AirPods decoder.
-                // For other codecs, wait for 3 failures.
-                int suspend_threshold = (cur_codec == 4) ? 1 : 3;
+                // AAC-ELD used to suspend on the first 100ms send fail and
+                // reset the FDK encoder every time. That printf+reset storm
+                // wedges audio. Raise the threshold; never reopen FDK here.
+                int suspend_threshold = 8;
 
                 if (fail_count >= suspend_threshold) {
-                    printf("Signal bad suspending stream for recovery (codec=%d, fail=%d)\n",
-                           cur_codec, fail_count);
-
-                    // Reset AAC-ELD encoder + sequence so both sides start fresh
-                    if (cur_codec == 4) {
-                        aaceld_frame_sequence = 1;
-                        context->rtp_timestamp = 0;
-
-                        // Reset FDK-AAC encoder to flush internal overlap state
-                        if (handleAAC != NULL) {
-                            aacEncClose(&handleAAC);
-                            handleAAC = NULL;
-                        }
-                        AACENC_ERROR err;
-                        if ((err = aacEncOpen(&handleAAC, 0x01, 2)) == AACENC_OK) {
-                            aacEncoder_SetParam(handleAAC, AACENC_AOT, 39);
-                            aacEncoder_SetParam(handleAAC, AACENC_BITRATE, 265000);
-                            aacEncoder_SetParam(handleAAC, AACENC_SAMPLERATE, 48000);
-                            aacEncoder_SetParam(handleAAC, AACENC_CHANNELMODE, 2);
-                            aacEncoder_SetParam(handleAAC, AACENC_GRANULE_LENGTH, 480);
-                            aacEncoder_SetParam(handleAAC, AACENC_SBR_MODE, 0);
-                            aacEncoder_SetParam(handleAAC, AACENC_BITRATEMODE, 0);
-                            aacEncoder_SetParam(handleAAC, AACENC_AFTERBURNER, 0);
-                            aacEncoder_SetParam(handleAAC, AACENC_TRANSMUX, TT_MP4_RAW);
-                            aacEncEncode(handleAAC, NULL, NULL, NULL, NULL);
-                            aacEncInfo(handleAAC, &aacinf);
-                        }
-                        printf("AAC-ELD: encoder reset, seq/ts/state cleared\n");
+                    if ((fail_count % 8) == 0) {
+                        printf("Signal bad suspending stream for recovery (codec=%d, fail=%d)\n",
+                               cur_codec, fail_count);
                     }
 
                     a2dp_demo_timer_stop(context);
@@ -953,11 +970,15 @@ static void avdtp_audio_timeout_handler(btstack_timer_source_t * timer){
                     fail_count = 0;
 
                     if (suspend_status != ERROR_CODE_SUCCESS) {
-                        // Suspend failed immediately — restart timer directly
-                        printf("Suspend failed (status %d), restarting timer\n", suspend_status);
-                        a2dp_demo_timer_start(context);
+                        // Do not tight-loop restart — wait for the recovery timer.
+                        printf("Suspend failed (status %d), waiting %d ms\n",
+                               suspend_status, SUSPEND_RECOVERY_TIMEOUT_MS);
+                        suspend_recovery_pending = true;
+                        btstack_run_loop_remove_timer(&suspend_recovery_timer);
+                        btstack_run_loop_set_timer_handler(&suspend_recovery_timer, suspend_recovery_handler);
+                        btstack_run_loop_set_timer(&suspend_recovery_timer, SUSPEND_RECOVERY_TIMEOUT_MS);
+                        btstack_run_loop_add_timer(&suspend_recovery_timer);
                     } else {
-                        // Arm recovery timer in case suspend response never arrives
                         suspend_recovery_pending = true;
                         btstack_run_loop_remove_timer(&suspend_recovery_timer);
                         btstack_run_loop_set_timer_handler(&suspend_recovery_timer, suspend_recovery_handler);
@@ -1224,6 +1245,8 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
             finish_setup_aac = false;
             status = avdtp_source_discover_stream_endpoints(media_tracker.avdtp_cid);
             a2dp_is_connected_flag = true;
+            reclaim_tries = 0;
+            btstack_run_loop_remove_timer(&reclaim_timer);
 
             // Open the AACP channel (PSM 0x1001) to the same AirPods once
             // A2DP signaling is up. Runs after a short settle delay.
@@ -1847,6 +1870,7 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
             finish_setup_aac = false;
             aacp_disconnect();
             printf("Signaling connection released.\n");
+            reclaim_arm_after_release();
             break;
         default:
             break;
@@ -2400,10 +2424,8 @@ void avdtp_disconnect_and_scan(){
 }
 
 void a2dp_source_reconnect(){
-    //sleep_ms(500);
+    avdtp_reclaim_hold_set(false);
     avdtp_source_connect((uint8_t *) get_device_addr(), &media_tracker.avdtp_cid);
-    sleep_ms(200);
-    //printf(" Create A2DP Source connection to addr %s, cid 0x%02x.\n", bd_addr_to_str(device_addr), media_tracker.a2dp_cid);
 }
 
 
@@ -2631,13 +2653,18 @@ static void avrcp_controller_packet_handler(uint8_t packet_type, uint16_t channe
     if (!media_tracker.avrcp_cid) return;
     
     switch (packet[2]){
-        case AVRCP_SUBEVENT_NOTIFICATION_VOLUME_CHANGED:
+        case AVRCP_SUBEVENT_NOTIFICATION_VOLUME_CHANGED: {
+            uint8_t prev = media_tracker.volume;
             media_tracker.volume = avrcp_subevent_notification_volume_changed_get_absolute_volume(packet);
-            
-            _bt_sink_volume_changed = true;
-            printf("AVRCP Controller: Notification Absolute Volume %d %%\n", media_tracker.volume * 100 / 127);\
 
+            _bt_sink_volume_changed = true;
+            printf("AVRCP Controller: Notification Absolute Volume %d %%\n", media_tracker.volume * 100 / 127);
+            // Crown rotation is AVRCP absolute volume, not a 0x0019 stem type.
+            // Mirror to USB speaker (UAC SET_CUR via audio_control_task) and HID.
+            if (media_tracker.volume > prev) hid_consumer_vol_up();
+            else if (media_tracker.volume < prev) hid_consumer_vol_down();
             break;
+        }
         case AVRCP_SUBEVENT_NOTIFICATION_EVENT_BATT_STATUS_CHANGED:
             // see avrcp_battery_status_t
             printf("AVRCP Controller: Notification Battery Status 0x%02x\n", avrcp_subevent_notification_event_batt_status_changed_get_battery_status(packet));

@@ -70,6 +70,8 @@ add_executable(${PROJECT_NAME}
     src/tinyusb/debug_cdc.c
     src/mic_gain.c
     src/control.c
+    src/control_usb.c
+    src/hid_consumer.c
 )
 
 

@@ -33,6 +33,7 @@
 
  #include "../btstack/btstack_avdtp_source.h"
  #include "../btstack/aacp_mic_dec.h"
+ #include "../btstack/aacp_status.h"
  #include "../mic_gain.h"
  #include "../control.h"
  #include "pico/flash.h"
@@ -360,9 +361,15 @@ void tinyusb_control_task(void){
      {
        TU_VERIFY(request->wLength == sizeof(audio_control_cur_2_t));
        int16_t v = (int16_t) tu_le16toh(((audio_control_cur_2_t const *)buf)->bCur);
+       // UAC2 silence is 0x8000 — mute, not wrapped 0 dB.
+       if ((uint16_t) v == VOLUME_CTRL_SILENCE) {
+         mic_gain_set_mute(true);
+         return true;
+       }
        if (v < 0) v = 0;
        int db = (v + 128) / 256;
        if (db > MIC_GAIN_DB_MAX) db = MIC_GAIN_DB_MAX;
+       mic_gain_set_mute(false);
        mic_gain_set_db((uint8_t) db);
        return true;
      }
@@ -503,6 +510,13 @@ void tinyusb_control_task(void){
    if (ITF_NUM_AUDIO_STREAMING_SPK == itf && alt != 0)
        blink_interval_ms = BLINK_STREAMING;
 
+   // Mac Apple Music via USB should steal Max 2 back from the iPhone.
+   if (ITF_NUM_AUDIO_STREAMING_SPK == itf && alt != 0) {
+       if (!get_a2dp_connected_flag()) {
+           control_request_reconnect();
+       }
+   }
+
    // Host opened/closed the recording stream (e.g. an app starts capturing).
    if (ITF_NUM_AUDIO_STREAMING_MIC == itf)
    {
@@ -542,6 +556,16 @@ void tinyusb_control_task(void){
     {
       int16_t *src = (int16_t *)spk_buf;
       uint16_t sample_count = spk_data_size / 4; // should be 44-45
+
+      // Conversation Awareness speaking ducks A2DP out only — never the mic.
+      uint8_t duck = aacp_get_ca_duck_q8();
+      if (duck < 255) {
+        int16_t *s = src;
+        uint32_t n = (uint32_t) sample_count * 2;
+        for (uint32_t i = 0; i < n; i++) {
+          s[i] = (int16_t)(((int32_t) s[i] * (int32_t) duck) >> 8);
+        }
+      }
 
       audio_slot_push_samples(src, sample_count);
 

@@ -52,7 +52,8 @@
    ITF_NUM_AUDIO_STREAMING_MIC,
    ITF_NUM_CDC,        // CDC-ACM control interface (debug console)
    ITF_NUM_CDC_DATA,   // CDC-ACM data interface
-   ITF_NUM_HID,        // vendor HID: WebHID settings (gain / pair / status)
+   ITF_NUM_HID,           // vendor HID: WebHID settings (gain / pair / status)
+   ITF_NUM_HID_CONSUMER,  // HID Consumer Control: play/pause, vol, mute
    ITF_NUM_TOTAL
  };
 
