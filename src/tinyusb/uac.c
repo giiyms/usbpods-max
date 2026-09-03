@@ -35,8 +35,9 @@
  #include "../btstack/aacp_mic_dec.h"
  #include "../btstack/aacp_status.h"
  #include "../mic_gain.h"
- #include "../control.h"
- #include "pico/flash.h"
+#include "../control.h"
+#include "pico/flash.h"
+#include "pico/time.h"
 
 
  
@@ -49,7 +50,13 @@
 
  uint32_t current_sample_rate  = 48000;
 
- bool need_change_bt_volume = false;
+ #define BT_VOL_MAX   127
+#define USB_ATT_MAX  25600
+#define BT_VOL_ECHO_IGNORE_MS 400
+
+static volatile bool need_change_bt_volume = false;
+static volatile uint32_t bt_vol_echo_until_ms = 0;
+static volatile int16_t  bt_vol_published_usb = 0;
  
  #define N_SAMPLE_RATES  TU_ARRAY_SIZE(sample_rates)
  
@@ -83,18 +90,31 @@
    VOLUME_CTRL_SILENCE = 0x8000,
  };
 
- #define BT_VOL_MAX   127
- #define USB_ATT_MAX  25600
- 
  static uint32_t blink_interval_ms = BLINK_NOT_MOUNTED;
+
+static uint32_t uac_now_ms(void) {
+  return to_ms_since_boot(get_absolute_time());
+}
+
+static bool uac_in_bt_vol_echo_window(void) {
+  return (int32_t)(uac_now_ms() - bt_vol_echo_until_ms) < 0;
+}
+
+static bool uac_host_vol_is_echo(int16_t host_vol) {
+  if (uac_in_bt_vol_echo_window()) return true;
+  if (host_vol == bt_vol_published_usb) return true;
+  return false;
+}
+
+static void uac_note_bt_vol_published(int16_t usb_vol) {
+  bt_vol_published_usb = usb_vol;
+  bt_vol_echo_until_ms = uac_now_ms() + BT_VOL_ECHO_IGNORE_MS;
+}
  
  // Audio controls
  // Current states
- int8_t mute[CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX + 1];       // +1 for master channel 0
- int16_t volume[CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX + 1];    // +1 for master channel 0
- 
- int16_t volume0_last = 0;
- int8_t mute0_last = 0; 
+int8_t mute[CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX + 1];       // +1 for master channel 0
+int16_t volume[CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX + 1];    // +1 for master channel 0
 
  // Buffer for microphone data
  //int32_t mic_buf[CFG_TUD_AUDIO_FUNC_1_EP_IN_SW_BUF_SZ / 4];
@@ -383,28 +403,36 @@ void tinyusb_control_task(void){
    {
      TU_VERIFY(request->wLength == sizeof(audio_control_cur_1_t));
  
-     mute[request->bChannelNumber] = ((audio_control_cur_1_t const *)buf)->bCur;
+     int8_t host_mute = ((audio_control_cur_1_t const *)buf)->bCur;
+     TU_LOG1("Set channel %d Mute: %d\r\n", request->bChannelNumber, host_mute);
 
-     if(request->bChannelNumber == 0){
-      need_change_bt_volume = true;
+     if (request->bChannelNumber == 0 && uac_in_bt_vol_echo_window()) {
+       // Crown/UAC interrupt echo — do not latch Mute or bounce AVRCP to 0.
+       return true;
      }
- 
-     TU_LOG1("Set channel %d Mute: %d\r\n", request->bChannelNumber, mute[request->bChannelNumber]);
- 
+     mute[request->bChannelNumber] = host_mute;
+     // Host mute zeros the USB stream locally. Do not set_bt_volume(-50).
      return true;
    }
    else if (request->bControlSelector == AUDIO_FU_CTRL_VOLUME)
    {
      TU_VERIFY(request->wLength == sizeof(audio_control_cur_2_t));
  
-     volume[request->bChannelNumber] = ((audio_control_cur_2_t const *)buf)->bCur;
- 
-     TU_LOG1("Set channel %d volume: %d dB\r\n", request->bChannelNumber, volume[request->bChannelNumber]/256);
+     int16_t host_vol = ((audio_control_cur_2_t const *)buf)->bCur;
+     TU_LOG1("Set channel %d volume: %d dB\r\n", request->bChannelNumber, host_vol/256);
 
-     if(request->bChannelNumber == 0){
-      need_change_bt_volume = true;
+     if (request->bChannelNumber == 0) {
+       if (uac_host_vol_is_echo(host_vol)) {
+         if (uac_in_bt_vol_echo_window()) {
+           volume[0] = bt_vol_published_usb;
+         }
+         return true;
+       }
+       volume[0] = host_vol;
+       need_change_bt_volume = true;
+     } else {
+       volume[request->bChannelNumber] = host_vol;
      }
- 
      return true;
    }
    else
@@ -619,14 +647,11 @@ void audio_control_task(void)
  {
    if (*get_is_bt_sink_volume_changed_ptr())
    {
-
     uint8_t bt_level = get_bt_volume();
 
-    mute[0] = get_bt_mute();
+    // Crown volume is silence at 0, not Feature Unit mute.
+    mute[0] = 0;
 
-    // 2) invert & scale into 0…25600
-    //    (BT_VOL_MAX - bt_level) maps 127→0, 0→127
-    //    multiply then divide with rounding
     uint16_t usb_level = (bt_level > BT_VOL_MAX)
                        ? USB_ATT_MAX
                        : (uint16_t)(( (uint32_t)(BT_VOL_MAX - bt_level)
@@ -634,17 +659,16 @@ void audio_control_task(void)
                                      + (BT_VOL_MAX/2) )
                                    / BT_VOL_MAX);
 
-    // 3) store into USB-Audio’s volume (attenuation) field
-    volume[0] = -1 * usb_level / 2;
+    volume[0] = (int16_t)(-1 * usb_level / 2);
+    uac_note_bt_vol_published(volume[0]);
 
-     // 6.1 Interrupt Data Message
      const audio_interrupt_data_t data = {
-       .bInfo = 0,                                       // Class-specific interrupt, originated from an interface
-       .bAttribute = AUDIO_CS_REQ_CUR,                   // Caused by current settings
-       .wValue_cn_or_mcn = 0,                            // CH0: master volume
-       .wValue_cs = AUDIO_FU_CTRL_VOLUME,                // Volume change
-       .wIndex_ep_or_int = 0,                            // From the interface itself
-       .wIndex_entity_id = UAC2_ENTITY_SPK_FEATURE_UNIT, // From feature unit
+       .bInfo = 0,
+       .bAttribute = AUDIO_CS_REQ_CUR,
+       .wValue_cn_or_mcn = 0,
+       .wValue_cs = AUDIO_FU_CTRL_VOLUME,
+       .wIndex_ep_or_int = 0,
+       .wIndex_entity_id = UAC2_ENTITY_SPK_FEATURE_UNIT,
      };
  
      tud_audio_int_write(&data);
@@ -652,36 +676,11 @@ void audio_control_task(void)
    }
 
    if (need_change_bt_volume){
-
-    //printf("vol is %d\n", volume[0]);
-    
-    if(mute[0] == 1 && volume0_last == volume[0]){
-      if (mute0_last == 1){
-        set_bt_volume(volume[0]/256);
-        mute0_last = 0;
-        mute[0] = 0;
-      }else{
-        mute0_last = 1;
-        set_bt_volume(-50);
-      }
-    }else{
-      set_bt_volume(volume[0]/256);
-    }
-    volume0_last = volume[0];
+    // Host slider only. Do not echo mute→AVRCP 0. Do not interrupt back
+    // (that re-triggers SET_CUR).
+    set_bt_volume(volume[0]/256);
+    uac_note_bt_vol_published(volume[0]);
     need_change_bt_volume = false;
-
-    const audio_interrupt_data_t data = {
-      .bInfo = 0,                                       // Class-specific interrupt, originated from an interface
-      .bAttribute = AUDIO_CS_REQ_CUR,                   // Caused by current settings
-      .wValue_cn_or_mcn = 0,                            // CH0: master volume
-      .wValue_cs = AUDIO_FU_CTRL_VOLUME,                // Volume change
-      .wIndex_ep_or_int = 0,                            // From the interface itself
-      .wIndex_entity_id = UAC2_ENTITY_SPK_FEATURE_UNIT, // From feature unit
-    };
-
-    tud_audio_int_write(&data);
-    //*get_is_bt_sink_volume_changed_ptr() = false;
    }
-
   }
  

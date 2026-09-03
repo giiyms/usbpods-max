@@ -3,6 +3,7 @@
 // USB HID Consumer Control (play/pause, next/prev, volume, mute).
 // Header is TinyUSB- and BTstack-free so AACP/AVRCP can latch keys.
 // Reports are sent from hid_consumer_task() in the USB task context.
+// Crown volume is UAC absolute, not HID Vol Up/Down.
 //
 
 #ifndef USBPODS_HID_CONSUMER_H
@@ -22,10 +23,14 @@
 #define HID_CC_PLAY_PAUSE (1u << 3)
 #define HID_CC_NEXT       (1u << 4)
 #define HID_CC_PREV       (1u << 5)
+#define HID_CC_PLAY       (1u << 6)
+#define HID_CC_PAUSE      (1u << 7)
 
 // IRQ-safe: latch a press. The USB task sends press then release (0).
 void hid_consumer_press(uint8_t bits);
 void hid_consumer_play_pause(void);
+void hid_consumer_play(void);
+void hid_consumer_pause(void);
 void hid_consumer_next(void);
 void hid_consumer_prev(void);
 void hid_consumer_vol_up(void);
