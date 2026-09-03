@@ -883,7 +883,7 @@
       flex-wrap: wrap;
     }
     .page-intro p { text-align: right; max-width: 420px; }
-    .product-card { padding: 22px 24px 18px; gap: 16px; }
+    .product-card { padding: 22px 24px 18px; gap: 16px; display: flex; flex-direction: column; }
     .layout-grid {
       display: grid;
       grid-template-columns: minmax(300px, 0.92fr) minmax(420px, 1.18fr);
@@ -1013,6 +1013,287 @@
       .facts-grid, .fact-dl.cols-2 { grid-template-columns: 1fr; }
       .clip-card { flex-direction: column; align-items: stretch; }
       .clip-card audio { width: 100%; }
+    }
+
+    /* Diagnostics — Quiet cream scopes + event log */
+    .diag-block {
+      margin-top: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      width: 100%;
+    }
+    .hint-strip {
+      background: var(--card-subtle);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-md);
+      padding: 12px 14px 11px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .hint-strip-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .hint-strip-note {
+      font-size: 11px;
+      color: var(--text-tertiary);
+      font-weight: 500;
+      text-align: right;
+      max-width: 420px;
+      line-height: 1.35;
+    }
+    .hint-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .hint-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #fff;
+      border: 1px solid var(--card-border);
+      border-radius: 100px;
+      padding: 4px 10px 4px 8px;
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--text-main);
+    }
+    .hint-chip .chip-k {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--text-tertiary);
+    }
+    .hint-chip .chip-v {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .hint-chip.ok { border-color: var(--green-border); background: var(--green-soft); }
+    .hint-chip.warn { border-color: var(--amber-border); background: var(--amber-soft); }
+    .hint-chip.bad { border-color: rgba(194, 65, 12, 0.28); background: var(--red-soft); }
+    .hint-chip.idle { background: #fff; }
+    .hint-warn-line {
+      font-size: 12px;
+      color: var(--amber);
+      font-weight: 600;
+      line-height: 1.35;
+      display: none;
+    }
+    .hint-warn-line.show { display: block; }
+    .scope-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    @media (max-width: 720px) {
+      .scope-grid { grid-template-columns: 1fr; }
+      .hint-strip-head { flex-direction: column; }
+      .hint-strip-note { text-align: left; max-width: none; }
+    }
+    .scope-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-md);
+      padding: 12px 14px 13px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      box-shadow: 0 4px 12px -2px rgba(45, 34, 20, 0.03);
+    }
+    .scope-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .scope-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .scope-canvas-wrap {
+      position: relative;
+      background: #f7f3eb;
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      overflow: hidden;
+      height: 108px;
+    }
+    .scope-canvas-wrap canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    .scope-meters {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .meter-row {
+      display: grid;
+      grid-template-columns: 42px 1fr 92px;
+      gap: 8px;
+      align-items: center;
+    }
+    .meter-lab {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--text-tertiary);
+    }
+    .meter-track {
+      height: 6px;
+      background: #e2dbce;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .meter-fill {
+      height: 100%;
+      width: 0%;
+      background: var(--accent-dark);
+      border-radius: 6px;
+      transition: width 0.06s linear;
+    }
+    .meter-fill.hot { background: var(--amber); }
+    .meter-db {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-main);
+      text-align: right;
+    }
+    .scope-status {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 10px;
+      font-size: 11.5px;
+      color: var(--text-muted);
+      font-weight: 500;
+      line-height: 1.35;
+    }
+    .scope-status .mono {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text-main);
+    }
+    .out-activity {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .out-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: var(--card-subtle);
+      border: 1px solid var(--card-border);
+      border-radius: 100px;
+      padding: 3px 9px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .out-pill .k { color: var(--text-tertiary); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .out-pill .v { font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+    .out-pill.warn { background: var(--amber-soft); border-color: var(--amber-border); }
+    .out-pill.ok { background: var(--green-soft); border-color: var(--green-border); }
+    .scope-limit {
+      font-size: 11px;
+      color: var(--text-tertiary);
+      line-height: 1.4;
+      font-style: italic;
+    }
+    .btn-scope {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--accent-dark);
+      color: #fff;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 100px;
+      font-size: 12px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+    }
+    .btn-scope:hover { opacity: 0.92; }
+    .btn-scope.is-on { background: #d32f2f; }
+    .btn-scope:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-ghost {
+      background: var(--pill-bg);
+      border: none;
+      color: var(--text-main);
+      font-size: 11.5px;
+      font-weight: 600;
+      font-family: inherit;
+      padding: 5px 10px;
+      border-radius: 100px;
+      cursor: pointer;
+    }
+    .btn-ghost:hover { background: var(--pill-hover); }
+    .diag-log-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-md);
+      padding: 12px 14px 13px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      box-shadow: 0 4px 12px -2px rgba(45, 34, 20, 0.03);
+    }
+    .diag-log-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .diag-log-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    #diagLog {
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      font-size: 11px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 280px;
+      overflow: auto;
+      color: var(--text-main);
+      background: #faf8f5;
+      border: 1px solid var(--card-border-subtle);
+      border-radius: 10px;
+      padding: 8px 0;
+      margin: 0;
+      min-height: 120px;
+    }
+    .log-line {
+      padding: 1px 12px;
+      border-left: 2px solid transparent;
+    }
+    .log-line .ts { color: var(--text-tertiary); margin-right: 8px; }
+    .log-line.kind-ear {
+      background: var(--amber-soft);
+      border-left-color: var(--amber);
+      font-weight: 600;
+    }
+    .log-line.kind-up {
+      background: var(--green-soft);
+      border-left-color: var(--green);
+    }
+    .log-line.kind-down {
+      background: var(--red-soft);
+      border-left-color: var(--red);
+    }
+    .log-line.kind-err { color: var(--red); border-left-color: var(--red); }
+    .log-line.kind-warn { color: var(--amber); }
+    .log-line.kind-heart { color: var(--text-tertiary); }
+    .log-empty {
+      padding: 18px 12px;
+      color: var(--text-tertiary);
+      font-style: italic;
     }
   </style>
 </head>
@@ -1326,9 +1607,95 @@
         </div>
       </div>
 
+      <section class="diag-block" aria-label="Diagnostics">
+        <div class="hint-strip" id="silentStrip">
+          <div class="hint-strip-head">
+            <span class="section-title">Why silent?</span>
+            <span class="hint-strip-note">Browsers cannot tap Teams or YouTube PCM. This strip is HID/Serial status plus this page’s own mic/speaker tests.</span>
+          </div>
+          <div class="hint-chips" id="silentChips"></div>
+          <div class="hint-warn-line" id="silentWarn"></div>
+        </div>
+
+        <div class="snapshot-header" style="margin-bottom:0">
+          <span class="snapshot-title">Diagnostics / Scope</span>
+          <span class="snapshot-meta" id="diagMeta">mic closed · speaker idle</span>
+        </div>
+
+        <div class="scope-grid">
+          <section class="scope-card">
+            <div class="scope-head">
+              <span class="section-title">Microphone</span>
+              <div class="scope-actions">
+                <button class="btn-scope" id="btnMicMon" type="button">Start mic monitor</button>
+              </div>
+            </div>
+            <div class="scope-canvas-wrap">
+              <canvas id="micCanvas" width="640" height="216" aria-label="Microphone oscilloscope"></canvas>
+            </div>
+            <div class="scope-meters">
+              <div class="meter-row">
+                <span class="meter-lab">Peak</span>
+                <div class="meter-track"><div class="meter-fill" id="micPeakFill"></div></div>
+                <span class="meter-db" id="micPeakDb">— dBFS</span>
+              </div>
+              <div class="meter-row">
+                <span class="meter-lab">RMS</span>
+                <div class="meter-track"><div class="meter-fill" id="micRmsFill"></div></div>
+                <span class="meter-db" id="micRmsDb">— dBFS</span>
+              </div>
+            </div>
+            <div class="scope-status">
+              <span>Stream: <span class="mono" id="micStreamState">closed</span></span>
+              <span>HID mic: <span class="mono" id="micHidState">—</span></span>
+              <span>Device: <span class="mono" id="micDevLabel">—</span></span>
+            </div>
+            <p class="scope-limit">Opens the UAC capture even if HID is already connected. Prefer a device labeled TinyUSB / USBPods / Pico (same picker as Record 3s). Talking into the Max while this runs should move the trace.</p>
+          </section>
+
+          <section class="scope-card">
+            <div class="scope-head">
+              <span class="section-title">Speaker / playback</span>
+              <div class="scope-actions">
+                <button class="btn-scope" id="btnSpkTest" type="button">Speaker test</button>
+              </div>
+            </div>
+            <div class="scope-canvas-wrap">
+              <canvas id="spkCanvas" width="640" height="216" aria-label="Speaker-test oscilloscope"></canvas>
+            </div>
+            <div class="scope-meters">
+              <div class="meter-row">
+                <span class="meter-lab">Peak</span>
+                <div class="meter-track"><div class="meter-fill" id="spkPeakFill"></div></div>
+                <span class="meter-db" id="spkPeakDb">— dBFS</span>
+              </div>
+              <div class="meter-row">
+                <span class="meter-lab">RMS</span>
+                <div class="meter-track"><div class="meter-fill" id="spkRmsFill"></div></div>
+                <span class="meter-db" id="spkRmsDb">— dBFS</span>
+              </div>
+            </div>
+            <div class="out-activity" id="outActivity"></div>
+            <p class="scope-limit">Scopes this page’s own tone (Oscillator → Analyser), routed with <span class="mono">setSinkId</span> to TinyUSB BT when the browser allows it — not Teams/YouTube. USB output activity below is mute / AVRCP vol / duck from HID or <code>@STATUS</code>. Optional: start mic monitor, play YouTube in the cans, watch acoustic pickup.</p>
+          </section>
+        </div>
+
+        <section class="diag-log-card">
+          <div class="diag-log-head">
+            <span class="section-title">Diagnostic log</span>
+            <div class="diag-log-actions">
+              <button class="btn-ghost" id="btnCopyLog" type="button">Copy log</button>
+              <button class="btn-ghost" id="btnDlLog" type="button">Download log</button>
+              <button class="btn-ghost" id="btnClearLog" type="button">Clear</button>
+            </div>
+          </div>
+          <div id="diagLog" role="log" aria-live="polite"><div class="log-empty" id="logEmpty">Events appear here — connect, then copy this log when audio cuts.</div></div>
+        </section>
+      </section>
+
       <details class="buried-tools">
         <summary>
-          <span>Dongle tools &amp; log</span>
+          <span>Dongle tools</span>
           <span class="summary-chevron">▼</span>
         </summary>
         <div class="tools-drawer">
@@ -1350,11 +1717,6 @@
               <span class="pairing-sub">Serial only — no invented AACP opcode</span>
               <button class="btn-secondary" id="btnSpatial" type="button">Spatial off</button>
             </div>
-          </div>
-          <div class="divider"></div>
-          <div class="drawer-group">
-            <span class="drawer-label">Log</span>
-            <pre id="log"></pre>
           </div>
         </div>
       </details>
@@ -1385,6 +1747,15 @@
     let lastVolPct = null;
     let lastClick = "—";
     let connectedKind = "";
+    let currentStatus = null;
+    let lastStatusSnap = null;
+    let lastEarAt = null;
+    let lastA2dpAt = null;
+    const LOG_CAP = 800;
+    const logLines = [];
+    const micMon = { open: false, stream: null, ctx: null, analyser: null, src: null, raf: 0 };
+    const spkTest = { running: false, ctx: null, analyser: null, osc: null, gain: null, sink: "", timer: 0 };
+    let scopeRaf = 0;
     const setText = (id, t) => { const el = $(id); if (el) el.textContent = t; };
     function batCell(v) {
       if (v === 255) return "unknown (255)";
@@ -1443,12 +1814,297 @@
 
 
     const $ = (id) => document.getElementById(id);
-    const log = (m) => {
-      const el = $("log");
-      el.textContent += m + "\n";
+    function pad(n, w) { return String(n).padStart(w || 2, "0"); }
+    function formatLocal(d) {
+      return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds()) + "." + pad(d.getMilliseconds(), 3);
+    }
+    function logText() {
+      const head = [
+        "USBPods Max diagnostic log",
+        "local: " + new Date().toString(),
+        "page: " + location.href,
+        "note: browsers cannot tap Teams/YouTube PCM; speaker scope is this page's test tone only",
+        "---"
+      ];
+      return head.concat(logLines.map((l) => "[" + l.t + "] " + l.msg)).join("\n");
+    }
+    function renderLogLine(entry) {
+      const row = document.createElement("div");
+      row.className = "log-line kind-" + (entry.kind || "info");
+      const ts = document.createElement("span");
+      ts.className = "ts";
+      ts.textContent = entry.t;
+      row.appendChild(ts);
+      row.appendChild(document.createTextNode(entry.msg));
+      return row;
+    }
+    function log(m, kind) {
+      const entry = { t: formatLocal(new Date()), msg: String(m), kind: kind || "info" };
+      logLines.push(entry);
+      if (logLines.length > LOG_CAP) logLines.splice(0, logLines.length - LOG_CAP);
+      const el = $("diagLog");
+      if (!el) return;
+      const empty = $("logEmpty");
+      if (empty) empty.remove();
+      el.appendChild(renderLogLine(entry));
+      while (el.childElementCount > LOG_CAP) el.removeChild(el.firstChild);
       el.scrollTop = el.scrollHeight;
-    };
+    }
     const setErr = (m) => { $("err").textContent = m || ""; };
+
+    function dbStr(db) {
+      if (!isFinite(db)) return "−∞ dBFS";
+      const n = Math.max(-99, db);
+      return (n >= 0 ? "+" : "") + n.toFixed(1) + " dBFS";
+    }
+    function dbPct(db) {
+      if (!isFinite(db)) return 0;
+      return Math.max(0, Math.min(100, (db + 60) / 60 * 100));
+    }
+    function analysePeakRms(analyser) {
+      if (!analyser) return { peak: -Infinity, rms: -Infinity };
+      const buf = new Float32Array(analyser.fftSize);
+      analyser.getFloatTimeDomainData(buf);
+      let peak = 0, sum = 0;
+      for (let i = 0; i < buf.length; i++) {
+        const v = buf[i];
+        const a = v < 0 ? -v : v;
+        if (a > peak) peak = a;
+        sum += v * v;
+      }
+      const rms = Math.sqrt(sum / buf.length);
+      const toDb = (x) => x <= 1e-8 ? -Infinity : 20 * Math.log10(x);
+      return { peak: toDb(peak), rms: toDb(rms), samples: buf };
+    }
+    function sizeCanvas(c) {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const r = c.getBoundingClientRect();
+      const w = Math.max(1, Math.round(r.width * dpr));
+      const h = Math.max(1, Math.round(r.height * dpr));
+      if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+      return { w: c.width, h: c.height };
+    }
+    function drawScope(canvas, analyser, ink) {
+      if (!canvas) return;
+      const { w, h } = sizeCanvas(canvas);
+      const g = canvas.getContext("2d");
+      g.fillStyle = "#f7f3eb";
+      g.fillRect(0, 0, w, h);
+      g.strokeStyle = "rgba(56,44,30,0.08)";
+      g.lineWidth = Math.max(1, w / 640);
+      g.beginPath();
+      g.moveTo(0, h / 2);
+      g.lineTo(w, h / 2);
+      g.stroke();
+      g.strokeStyle = ink || "#191816";
+      g.lineWidth = Math.max(1.2, w / 420);
+      g.beginPath();
+      if (analyser) {
+        const data = new Uint8Array(analyser.fftSize);
+        analyser.getByteTimeDomainData(data);
+        const n = data.length;
+        for (let i = 0; i < n; i++) {
+          const x = (i / (n - 1)) * w;
+          const y = (data[i] / 255) * h;
+          if (i === 0) g.moveTo(x, y);
+          else g.lineTo(x, y);
+        }
+      } else {
+        g.moveTo(0, h / 2);
+        g.lineTo(w, h / 2);
+      }
+      g.stroke();
+    }
+    function paintMeter(fillId, dbId, db) {
+      const fill = $(fillId), lab = $(dbId);
+      if (lab) lab.textContent = dbStr(db);
+      if (fill) {
+        const pct = dbPct(db);
+        fill.style.width = pct + "%";
+        fill.classList.toggle("hot", isFinite(db) && db > -3);
+      }
+    }
+    function scopeLoop() {
+      scopeRaf = 0;
+      const micA = micMon.open ? micMon.analyser : null;
+      const spkA = spkTest.running ? spkTest.analyser : null;
+      drawScope($("micCanvas"), micA, micMon.open ? "#257a38" : "#9c9486");
+      drawScope($("spkCanvas"), spkA, spkTest.running ? "#191816" : "#9c9486");
+      const micM = analysePeakRms(micA);
+      const spkM = analysePeakRms(spkA);
+      paintMeter("micPeakFill", "micPeakDb", micA ? micM.peak : -Infinity);
+      paintMeter("micRmsFill", "micRmsDb", micA ? micM.rms : -Infinity);
+      paintMeter("spkPeakFill", "spkPeakDb", spkA ? spkM.peak : -Infinity);
+      paintMeter("spkRmsFill", "spkRmsDb", spkA ? spkM.rms : -Infinity);
+      if (micMon.open || spkTest.running) {
+        scopeRaf = requestAnimationFrame(scopeLoop);
+      }
+    }
+    function kickScope() {
+      if (!scopeRaf) scopeRaf = requestAnimationFrame(scopeLoop);
+    }
+
+    function ownsLabel(v) {
+      if (v === 1 || v === true) return "yes";
+      if (v === 2 || v === false) return "no";
+      return "—";
+    }
+    function muteLabel(v) {
+      if (v === undefined || v === "" || v === null || Number.isNaN(Number(v))) return "—";
+      return Number(v) ? "on" : "off";
+    }
+    function volLabel(v) {
+      if (v === undefined || v === "" || v === null || Number.isNaN(Number(v))) return "—";
+      const n = Number(v);
+      if (n < 0) return "—";
+      return String(Math.round(n * 100 / 127)) + "%";
+    }
+    function statusSnap(s) {
+      const ear = earLabel(s.ear_l, s.ear_r);
+      const last19 = (s.last19 && s.last19 !== "-" && s.last19 !== "") ? s.last19 : last19Hex(s.last19_type, s.last19_bud);
+      return {
+        a2dp: s.a2dp ? "up" : "down",
+        aacp: s.aacp ? "up" : "down",
+        mic: s.mic ? "on" : "off",
+        duck: s.duck ? "ducking" : "idle",
+        ear_l: unk(s.ear_l) ? "—" : String(s.ear_l),
+        ear_r: unk(s.ear_r) ? "—" : String(s.ear_r),
+        ear: ear,
+        owns: ownsLabel(s.owns),
+        addr: s.addr || "—",
+        vol: volLabel(s.vol),
+        mute: muteLabel(s.mute),
+        last19: last19,
+        name: dashName(s.name),
+        gain: (typeof s.gain === "number" && !Number.isNaN(s.gain)) ? (s.gain + " dB") : "—",
+        noise: noiseName(s.noise),
+        ca: caLabel(s.ca),
+        dec_err: (s.dec_err === undefined || s.dec_err === "" || Number.isNaN(Number(s.dec_err))) ? "—" : String(s.dec_err)
+      };
+    }
+    const SNAP_KEYS = ["a2dp", "aacp", "mic", "duck", "ear_l", "ear_r", "ear", "owns", "addr", "vol", "mute", "last19", "name", "gain", "noise", "ca", "dec_err"];
+    function formatSnap(snap) {
+      return SNAP_KEYS.map((k) => k + "=" + snap[k]).join(" ");
+    }
+    function logStatusTransitions(s) {
+      const snap = statusSnap(s);
+      const prev = lastStatusSnap;
+      if (!prev) {
+        log("STATUS " + formatSnap(snap));
+        lastStatusSnap = snap;
+        if (snap.ear === "Off head") {
+          lastEarAt = new Date();
+          log("EAR (initial) Off head (L=" + snap.ear_l + " R=" + snap.ear_r + ") — firmware may HID-pause host if it was playing", "ear");
+        }
+        return;
+      }
+      const changes = [];
+      for (let i = 0; i < SNAP_KEYS.length; i++) {
+        const k = SNAP_KEYS[i];
+        if (snap[k] !== prev[k]) changes.push(k + "=" + snap[k] + " (was " + prev[k] + ")");
+      }
+      if (changes.length) {
+        let kind = "info";
+        if (snap.ear !== prev.ear) kind = "ear";
+        else if ((snap.a2dp === "down" && prev.a2dp === "up") || (snap.aacp === "down" && prev.aacp === "up") || (snap.mic === "off" && prev.mic === "on")) kind = "down";
+        else if ((snap.a2dp === "up" && prev.a2dp === "down") || (snap.aacp === "up" && prev.aacp === "down") || (snap.mic === "on" && prev.mic === "off")) kind = "up";
+        log("STATUS " + changes.join(" · "), kind);
+      }
+      if (snap.ear !== prev.ear) {
+        lastEarAt = new Date();
+        const extra = snap.ear === "Off head" ? " — firmware may HID-pause host if it was playing" : "";
+        log("EAR " + prev.ear + " → " + snap.ear + " (L=" + snap.ear_l + " R=" + snap.ear_r + ")" + extra, "ear");
+      }
+      if (snap.a2dp !== prev.a2dp) {
+        lastA2dpAt = new Date();
+        log("A2DP " + prev.a2dp + " → " + snap.a2dp, snap.a2dp === "up" ? "up" : "down");
+      }
+      if (snap.aacp !== prev.aacp) {
+        log("AACP " + prev.aacp + " → " + snap.aacp, snap.aacp === "up" ? "up" : "down");
+      }
+      if (snap.mic !== prev.mic) {
+        log("MIC HID " + prev.mic + " → " + snap.mic, snap.mic === "on" ? "up" : "down");
+      }
+      lastStatusSnap = snap;
+    }
+    function ago(d) {
+      if (!d) return "—";
+      return formatLocal(d);
+    }
+    function chip(k, v, cls) {
+      return '<span class="hint-chip ' + (cls || "idle") + '"><span class="chip-k">' + k + '</span><span class="chip-v">' + v + "</span></span>";
+    }
+    function paintSilentHints() {
+      const el = $("silentChips");
+      const warn = $("silentWarn");
+      if (!el) return;
+      const snap = lastStatusSnap;
+      const usbOk = !!connectedKind;
+      const a2dp = snap ? snap.a2dp : "—";
+      const ear = snap ? snap.ear : "—";
+      const hidMic = snap ? snap.mic : "—";
+      const mute = snap ? snap.mute : "—";
+      const stream = micMon.open ? "open" : "closed";
+      const warns = [];
+      if (!usbOk) warns.push("USB not linked — Connect TinyUSB BT (HID) or USBPods Max Console (serial).");
+      if (usbOk && a2dp === "down") warns.push("A2DP is down — host Bluetooth may own the Max 2, or the link dropped.");
+      if (ear === "Off head") warns.push("Off-head: firmware sends HID pause only if it was playing — USB device can stay present while the host is paused.");
+      if (mute === "on") warns.push("UAC mic mute is on (HID byte 14 / @STATUS mute). This is capture mute, not a speaker mute bit.");
+      if (micMon.open && hidMic === "off") warns.push("Mic stream is open here, but HID mic flag is off — Teams may not be using this capture, or AACP mic is idle.");
+      el.innerHTML = [
+        chip("USB", usbOk ? connectedKind : "not linked", usbOk ? "ok" : "bad"),
+        chip("A2DP", a2dp, a2dp === "up" ? "ok" : (a2dp === "down" ? "bad" : "idle")),
+        chip("Ear", ear, ear === "Off head" ? "warn" : (ear === "On head" ? "ok" : "idle")),
+        chip("Mic stream", stream, micMon.open ? "ok" : "idle"),
+        chip("HID mic", hidMic, hidMic === "on" ? "ok" : "idle"),
+        chip("UAC mic mute", mute, mute === "on" ? "warn" : "idle"),
+        chip("Last ear", ago(lastEarAt), ear === "Off head" ? "warn" : "idle"),
+        chip("Last A2DP", ago(lastA2dpAt), a2dp === "down" ? "warn" : "idle")
+      ].join("");
+      if (warn) {
+        warn.textContent = warns.join(" ");
+        warn.classList.toggle("show", warns.length > 0);
+      }
+      setText("micHidState", hidMic);
+      setText("micStreamState", stream);
+      paintOutputActivity();
+      setText("diagMeta", stream + " · speaker " + (spkTest.running ? "test" : "idle"));
+    }
+    function pill(k, v, cls) {
+      return '<span class="out-pill ' + (cls || "") + '"><span class="k">' + k + '</span><span class="v">' + v + "</span></span>";
+    }
+    function paintOutputActivity() {
+      const el = $("outActivity");
+      if (!el) return;
+      const snap = lastStatusSnap;
+      const a2dp = snap ? snap.a2dp : "—";
+      const vol = snap ? snap.vol : "—";
+      const mute = snap ? snap.mute : "—";
+      const duck = snap ? snap.duck : "—";
+      const volNote = vol === "—" ? "— (serial @STATUS only)" : vol + " AVRCP";
+      el.innerHTML = [
+        pill("A2DP", a2dp, a2dp === "up" ? "ok" : (a2dp === "down" ? "warn" : "")),
+        pill("AVRCP vol", volNote, ""),
+        pill("UAC mic mute", mute, mute === "on" ? "warn" : ""),
+        pill("CA duck", duck, duck === "ducking" ? "warn" : ""),
+        pill("Speaker test", spkTest.running ? ("on" + (spkTest.sink ? " · " + spkTest.sink : "")) : "idle", spkTest.running ? "ok" : "")
+      ].join("");
+    }
+    function heartbeat() {
+      if (!connectedKind && !micMon.open && !spkTest.running) return;
+      const s = lastStatusSnap;
+      log("HEARTBEAT usb=" + (connectedKind || "not-linked") +
+        " a2dp=" + (s ? s.a2dp : "—") +
+        " aacp=" + (s ? s.aacp : "—") +
+        " mic_hid=" + (s ? s.mic : "—") +
+        " mic_stream=" + (micMon.open ? "open" : "closed") +
+        " ear=" + (s ? s.ear : "—") +
+        " mute=" + (s ? s.mute : "—") +
+        " vol=" + (s ? s.vol : "—") +
+        " duck=" + (s ? s.duck : "—") +
+        " owns=" + (s ? s.owns : "—") +
+        " speaker_test=" + (spkTest.running ? "on" : "off"), "heart");
+    }
 
     const LIVE_IDS = ["gain", "btnPair", "btnDrop", "btnRecon", "btnSlot1", "btnSlot2"];
 
@@ -1605,6 +2261,9 @@
       setText("fGestures", (s.gestures === undefined || Number.isNaN(Number(s.gestures))) ? "—" : hexByte(s.gestures));
       setText("fGrabBadge", (s.listen === undefined || Number.isNaN(Number(s.listen))) ? "—" : hexByte(s.listen) + " mask");
       if (connectedKind) setText("factsMeta", "RP2350 · " + connectedKind + " live");
+      currentStatus = s;
+      logStatusTransitions(s);
+      paintSilentHints();
     }
 
     function parseHid(buf) {
@@ -1623,6 +2282,7 @@
         chime: u[22], crown: u[23], listen: u[24], gestures: u[25], hold: u[26],
         last19_type: u[27], last19_bud: u[28],
         autoans: u[29], adaptvol: u[30], sleep: u[31],
+        mute: u[14],
         addr: addr === "00:00:00:00:00:00" ? "—" : addr
       });
     }
@@ -1686,10 +2346,15 @@
       $("btnDisconnectApp").hidden = false;
       setLiveEnabled(true);
       setText("factsMeta", "RP2350 · " + connectedKind + " live");
+      paintSilentHints();
     }
 
     function setDisconnected() {
       connectedKind = "";
+      currentStatus = null;
+      lastStatusSnap = null;
+      lastEarAt = null;
+      lastA2dpAt = null;
       $("connBadge").textContent = "Not connected";
       $("card").classList.add("is-off");
       $("btnConnect").hidden = false;
@@ -1721,6 +2386,7 @@
       setTag("fDuck", false, "ducking", "—");
       setText("stFindmy", "Pico cannot join iCloud");
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      paintSilentHints();
     }
 
     async function sendHid(cmd, arg) {
@@ -1759,11 +2425,11 @@
       await dev.open();
       hid = dev;
       hid.addEventListener("inputreport", (ev) => parseHid(ev.data.buffer));
-      hid.addEventListener("disconnect", () => { hid = null; setDisconnected(); log("HID disconnected"); });
+      hid.addEventListener("disconnect", () => { hid = null; setDisconnected(); log("HID disconnect", "down"); });
       await sendHid(CMD.STATUS);
       pollTimer = setInterval(() => sendHid(CMD.STATUS), 1000);
       setConnected("WebHID");
-      log("Connected via WebHID");
+      log("HID connect", "up");
     }
 
     async function connectSerial() {
@@ -1774,7 +2440,7 @@
       serialWriter = port.writable.getWriter();
       serialReader = port.readable.getReader();
       setConnected("Web Serial");
-      log("Connected via Web Serial");
+      log("Serial connect", "up");
       await sendSerial("status");
       pollTimer = setInterval(() => sendSerial("status"), 1000);
       (async () => {
@@ -1801,10 +2467,11 @@
             }
           }
         } catch (e) {
-          log("serial read ended: " + e.message);
+          log("serial read ended: " + e.message, "warn");
         }
         serial = null; serialWriter = null; serialReader = null;
         setDisconnected();
+        log("Serial disconnect", "down");
       })();
     }
 
@@ -1814,14 +2481,14 @@
         if (navigator.hid) {
           try { await connectHid(); return; }
           catch (e) {
-            if (e.name === "NotFoundError") log("No HID pick; trying Web Serial");
+            if (e.name === "NotFoundError") log("No HID pick; trying Web Serial", "warn");
             else throw e;
           }
         }
         await connectSerial();
       } catch (e) {
         setErr(e.message);
-        log("connect failed: " + e.message);
+        log("connect failed: " + e.message, "err");
       }
     };
 
@@ -1834,7 +2501,7 @@
         if (serial) { await serial.close(); serial = null; }
       } catch (_) {}
       setDisconnected();
-      log("Released");
+      log("Released HID/Serial", "down");
     };
 
     $("gain").oninput = () => {
@@ -1888,6 +2555,173 @@
       if (hit) return { deviceId: hit.deviceId, label: hit.label };
       const def = mics.find((d) => d.deviceId === "default") || mics[0];
       return def ? { deviceId: def.deviceId, label: def.label || "default mic" } : { deviceId: undefined, label: "default mic" };
+    }
+
+    async function pickSpeakerId() {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const outs = devices.filter((d) => d.kind === "audiooutput");
+      const hit = outs.find((d) => /tinyusb|usbpods|pico/i.test(d.label || ""));
+      if (hit) return { deviceId: hit.deviceId, label: hit.label };
+      const def = outs.find((d) => d.deviceId === "default") || outs[0];
+      return def ? { deviceId: def.deviceId, label: def.label || "default output" } : { deviceId: "", label: "default output" };
+    }
+
+    async function probeAudioLabels() {
+      try {
+        const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+        probe.getTracks().forEach((t) => t.stop());
+      } catch (_) {}
+    }
+
+    async function openMicConstraints() {
+      await probeAudioLabels();
+      const pick = await pickMicId();
+      const audio = {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        channelCount: 1
+      };
+      if (pick.deviceId) audio.deviceId = { exact: pick.deviceId };
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio });
+      } catch (_) {
+        delete audio.deviceId;
+        stream = await navigator.mediaDevices.getUserMedia({ audio });
+        pick.label = (pick.label || "mic") + " (fallback default)";
+      }
+      return { stream, pick };
+    }
+
+    async function startMicMonitor() {
+      if (micMon.open) return;
+      setErr("");
+      log("mic-monitor start");
+      const { stream, pick } = await openMicConstraints();
+      const ctx = new AudioContext();
+      if (ctx.state === "suspended") await ctx.resume();
+      const src = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.35;
+      const mute = ctx.createGain();
+      mute.gain.value = 0;
+      src.connect(analyser);
+      analyser.connect(mute);
+      mute.connect(ctx.destination);
+      micMon.open = true;
+      micMon.stream = stream;
+      micMon.ctx = ctx;
+      micMon.analyser = analyser;
+      micMon.src = src;
+      setText("micDevLabel", pick.label || "—");
+      $("btnMicMon").textContent = "Stop mic monitor";
+      $("btnMicMon").classList.add("is-on");
+      log("mic-monitor stream open · " + (pick.label || "unnamed"));
+      paintSilentHints();
+      kickScope();
+    }
+
+    async function stopMicMonitor() {
+      if (!micMon.open && !micMon.stream) return;
+      log("mic-monitor stop");
+      micMon.open = false;
+      try { if (micMon.src) micMon.src.disconnect(); } catch (_) {}
+      try { if (micMon.ctx) await micMon.ctx.close(); } catch (_) {}
+      if (micMon.stream) micMon.stream.getTracks().forEach((t) => t.stop());
+      micMon.stream = null;
+      micMon.ctx = null;
+      micMon.analyser = null;
+      micMon.src = null;
+      $("btnMicMon").textContent = "Start mic monitor";
+      $("btnMicMon").classList.remove("is-on");
+      setText("micDevLabel", "—");
+      paintSilentHints();
+      drawScope($("micCanvas"), null, "#9c9486");
+      paintMeter("micPeakFill", "micPeakDb", -Infinity);
+      paintMeter("micRmsFill", "micRmsDb", -Infinity);
+    }
+
+    async function startSpeakerTest() {
+      if (spkTest.running) return;
+      setErr("");
+      log("speaker-test start");
+      await probeAudioLabels();
+      const pick = await pickSpeakerId();
+      const ctx = new AudioContext({ sampleRate: 48000 });
+      if (ctx.state === "suspended") await ctx.resume();
+      let sinkNote = "default output";
+      if (typeof ctx.setSinkId === "function" && pick.deviceId) {
+        try {
+          await ctx.setSinkId(pick.deviceId);
+          sinkNote = pick.label || pick.deviceId;
+          log("speaker-test setSinkId · " + sinkNote);
+        } catch (e) {
+          log("setSinkId failed: " + e.message + " — playing to default output. Set TinyUSB BT as Windows default if the cans stay silent.", "warn");
+          sinkNote = "default (setSinkId failed)";
+        }
+      } else if (!pick.deviceId || /default/i.test(pick.label || "")) {
+        log("speaker-test using default output (no TinyUSB sink label). If Chrome hid device names, grant mic permission once. This page cannot tap Teams PCM.", "warn");
+      } else {
+        log("AudioContext.setSinkId missing — playing to default. Select TinyUSB BT in Windows sound settings.", "warn");
+        sinkNote = "default (no setSinkId)";
+      }
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.2;
+      osc.type = "sine";
+      const t0 = ctx.currentTime;
+      osc.frequency.setValueAtTime(220, t0);
+      osc.frequency.exponentialRampToValueAtTime(1800, t0 + 1.1);
+      osc.frequency.exponentialRampToValueAtTime(440, t0 + 1.8);
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(0.18, t0 + 0.04);
+      osc.connect(gain);
+      gain.connect(analyser);
+      analyser.connect(ctx.destination);
+      osc.start(t0);
+      spkTest.running = true;
+      spkTest.ctx = ctx;
+      spkTest.analyser = analyser;
+      spkTest.osc = osc;
+      spkTest.gain = gain;
+      spkTest.sink = sinkNote;
+      $("btnSpkTest").textContent = "Stop test";
+      $("btnSpkTest").classList.add("is-on");
+      paintSilentHints();
+      kickScope();
+      spkTest.timer = setTimeout(() => { stopSpeakerTest("timeout"); }, 12000);
+    }
+
+    async function stopSpeakerTest(why) {
+      if (!spkTest.running && !spkTest.ctx) return;
+      if (spkTest.timer) { clearTimeout(spkTest.timer); spkTest.timer = 0; }
+      log("speaker-test stop" + (why ? " (" + why + ")" : ""));
+      try {
+        if (spkTest.gain && spkTest.ctx) {
+          const t = spkTest.ctx.currentTime;
+          spkTest.gain.gain.cancelScheduledValues(t);
+          spkTest.gain.gain.setValueAtTime(Math.max(spkTest.gain.gain.value, 0.0001), t);
+          spkTest.gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+        }
+      } catch (_) {}
+      try { if (spkTest.osc) spkTest.osc.stop(); } catch (_) {}
+      try { if (spkTest.ctx) await spkTest.ctx.close(); } catch (_) {}
+      spkTest.running = false;
+      spkTest.ctx = null;
+      spkTest.analyser = null;
+      spkTest.osc = null;
+      spkTest.gain = null;
+      spkTest.sink = "";
+      $("btnSpkTest").textContent = "Speaker test";
+      $("btnSpkTest").classList.remove("is-on");
+      paintSilentHints();
+      drawScope($("spkCanvas"), null, "#9c9486");
+      paintMeter("spkPeakFill", "spkPeakDb", -Infinity);
+      paintMeter("spkRmsFill", "spkRmsDb", -Infinity);
     }
 
     function pcmToWav(float32, sampleRate) {
@@ -1964,7 +2798,7 @@
           stream = await navigator.mediaDevices.getUserMedia({ audio });
         }
         $("recordBtnText").textContent = "Recording…";
-        log("mic clip from: " + pick.label);
+        log("record start · " + pick.label);
         ctx = new AudioContext();
         const src = ctx.createMediaStreamSource(stream);
         const proc = ctx.createScriptProcessor(4096, 1, 1);
@@ -1987,10 +2821,10 @@
         const blob = pcmToWav(pcm, ctx.sampleRate);
         const g = $("gain").value;
         addClip(blob, g, pick.label);
-        log("saved 3s clip at " + g + " dB (" + Math.round(pcm.length / ctx.sampleRate * 10) / 10 + "s)");
+        log("record saved 3s clip at " + g + " dB (" + Math.round(pcm.length / ctx.sampleRate * 10) / 10 + "s)");
       } catch (e) {
         setErr(e.message);
-        log("record failed: " + e.message);
+        log("record failed: " + e.message, "err");
       } finally {
         if (ctx) try { await ctx.close(); } catch (_) {}
         if (stream) stream.getTracks().forEach((t) => t.stop());
@@ -2005,7 +2839,71 @@
       setErr("Open this page over HTTPS (GitHub Pages) or http://localhost — browsers block WebHID/Web Serial on file://");
     }
 
+    $("btnMicMon").onclick = async () => {
+      try {
+        if (micMon.open) await stopMicMonitor();
+        else await startMicMonitor();
+      } catch (e) {
+        setErr(e.message);
+        log("mic-monitor failed: " + e.message, "err");
+        try { await stopMicMonitor(); } catch (_) {}
+      }
+    };
+    $("btnSpkTest").onclick = async () => {
+      try {
+        if (spkTest.running) await stopSpeakerTest("user");
+        else await startSpeakerTest();
+      } catch (e) {
+        setErr(e.message);
+        log("speaker-test failed: " + e.message, "err");
+        try { await stopSpeakerTest("error"); } catch (_) {}
+      }
+    };
+    $("btnCopyLog").onclick = async () => {
+      const text = logText();
+      try {
+        await navigator.clipboard.writeText(text);
+        log("log copied to clipboard (" + logLines.length + " lines)");
+      } catch (e) {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+        log("log copied to clipboard (" + logLines.length + " lines)");
+      }
+    };
+    $("btnDlLog").onclick = () => {
+      const blob = new Blob([logText()], { type: "text/plain" });
+      const a = document.createElement("a");
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      a.href = URL.createObjectURL(blob);
+      a.download = "usbpods-max-diag-" + stamp + ".txt";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      log("log downloaded (" + logLines.length + " lines)");
+    };
+    $("btnClearLog").onclick = () => {
+      logLines.length = 0;
+      const el = $("diagLog");
+      el.innerHTML = "";
+      const empty = document.createElement("div");
+      empty.className = "log-empty";
+      empty.id = "logEmpty";
+      empty.textContent = "Events appear here — connect, then copy this log when audio cuts.";
+      el.appendChild(empty);
+    };
+
     paintGain(0);
+    paintSilentHints();
+    drawScope($("micCanvas"), null, "#9c9486");
+    drawScope($("spkCanvas"), null, "#9c9486");
+    setInterval(heartbeat, 10000);
+    window.addEventListener("resize", () => {
+      drawScope($("micCanvas"), micMon.open ? micMon.analyser : null, micMon.open ? "#257a38" : "#9c9486");
+      drawScope($("spkCanvas"), spkTest.running ? spkTest.analyser : null, spkTest.running ? "#191816" : "#9c9486");
+    });
   </script>
 </body>
 </html>
