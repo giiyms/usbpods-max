@@ -56,7 +56,7 @@ tusb_desc_device_t const desc_device =
 
     .idVendor           = 0xCafe,
     .idProduct          = USB_PID,
-    .bcdDevice          = 0x0100,
+    .bcdDevice          = 0x0101,
 
     .iManufacturer      = 0x01,
     .iProduct           = 0x02,
@@ -77,7 +77,8 @@ uint8_t const * tud_descriptor_device_cb(void)
 //--------------------------------------------------------------------+
 #define CONFIG_TOTAL_LEN    	(TUD_CONFIG_DESC_LEN \
     + CFG_TUD_AUDIO * TUD_AUDIO_HEADSET_STEREO_DESC_LEN \
-    + CFG_TUD_CDC * TUD_CDC_DESC_LEN)
+    + CFG_TUD_CDC * TUD_CDC_DESC_LEN \
+    + CFG_TUD_HID * TUD_HID_INOUT_DESC_LEN)
 
 #if CFG_TUSB_MCU == OPT_MCU_LPC175X_6X || CFG_TUSB_MCU == OPT_MCU_LPC177X_8X || CFG_TUSB_MCU == OPT_MCU_LPC40XX
   // LPC 17xx and 40xx endpoint type (bulk/interrupt/iso) are fixed by its number
@@ -117,6 +118,32 @@ uint8_t const * tud_descriptor_device_cb(void)
 #define EPNUM_CDC_NOTIF   0x83
 #define EPNUM_CDC_OUT     0x04
 #define EPNUM_CDC_IN      0x84
+#define EPNUM_HID_OUT     0x05
+#define EPNUM_HID_IN      0x85
+
+// Vendor HID report: 32-byte input (status) + 32-byte output (commands), no
+// report IDs. Usage page 0xFFA0 — see src/control.h and web/PROTOCOL.md.
+uint8_t const desc_hid_report[] =
+{
+  0x06, 0xA0, 0xFF,              // Usage Page (Vendor-defined 0xFFA0)
+  0x09, 0x01,                    // Usage (0x01)
+  0xA1, 0x01,                    // Collection (Application)
+    0x09, 0x02,                  //   Usage (0x02) Input status
+    0x15, 0x00,                  //   Logical Minimum (0)
+    0x26, 0xFF, 0x00,            //   Logical Maximum (255)
+    0x75, 0x08,                  //   Report Size (8)
+    0x95, CFG_TUD_HID_EP_BUFSIZE,//   Report Count
+    0x81, 0x02,                  //   Input (Data, Variable, Absolute)
+    0x09, 0x03,                  //   Usage (0x03) Output commands
+    0x91, 0x02,                  //   Output (Data, Variable, Absolute)
+  0xC0                           // End Collection
+};
+
+uint8_t const * tud_hid_descriptor_report_cb(uint8_t instance)
+{
+  (void) instance;
+  return desc_hid_report;
+}
 
 uint8_t const desc_configuration[] =
 {
@@ -127,7 +154,10 @@ uint8_t const desc_configuration[] =
     TUD_AUDIO_HEADSET_STEREO_DESCRIPTOR(2, EPNUM_AUDIO_OUT, EPNUM_AUDIO_IN | 0x80, EPNUM_AUDIO_INT | 0x80),
 
     // CDC-ACM debug console: control itf, string idx, notif EP, notif size, data OUT, data IN, data EP size
-    TUD_CDC_DESCRIPTOR(ITF_NUM_CDC, 6, EPNUM_CDC_NOTIF, 8, EPNUM_CDC_OUT, EPNUM_CDC_IN, 64)
+    TUD_CDC_DESCRIPTOR(ITF_NUM_CDC, 6, EPNUM_CDC_NOTIF, 8, EPNUM_CDC_OUT, EPNUM_CDC_IN, 64),
+
+    // Vendor HID (WebHID): IN+OUT interrupt EPs so Chrome sendReport uses the OUT pipe
+    TUD_HID_INOUT_DESCRIPTOR(ITF_NUM_HID, 7, HID_ITF_PROTOCOL_NONE, sizeof(desc_hid_report), EPNUM_HID_OUT, EPNUM_HID_IN, CFG_TUD_HID_EP_BUFSIZE, 10)
 
   };
 
@@ -162,12 +192,13 @@ enum {
 char const *string_desc_arr[] =
 {
   (const char[]) { 0x09, 0x04 },  // 0: is supported language is English (0x0409)
-  "TinyUSB",                      // 1: Manufacturer
-  "TinyUSB BT",              // 2: Product
+  "USBPods Max",                  // 1: Manufacturer
+  "TinyUSB BT",                   // 2: Product (keep — Windows/macOS device name)
   NULL,                           // 3: Serials will use unique ID if possible
-  "TinyUSB BT",             // 4: Audio Interface
-  "TinyUSB BT",                 // 5: Audio Interface
-  "Pico Debug Console",           // 6: CDC debug console
+  "TinyUSB BT",                   // 4: Audio Interface
+  "TinyUSB BT",                   // 5: Audio Interface
+  "USBPods Max Console",          // 6: CDC serial menu + debug log
+  "USBPods Max Control",          // 7: vendor HID
 };
 
 

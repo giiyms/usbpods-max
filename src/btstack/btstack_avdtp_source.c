@@ -1845,6 +1845,7 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
             have_ldac_codec_capabilities = false;
             have_aaceld_codec_capabilities = false;
             finish_setup_aac = false;
+            aacp_disconnect();
             printf("Signaling connection released.\n");
             break;
         default:
@@ -2367,6 +2368,13 @@ static int setup_aaceld_configuration(){
     return status;
 }
 
+
+void avdtp_disconnect_keep_pairing(void){
+    a2dp_demo_timer_stop(&media_tracker);
+    a2dp_source_disconnect(media_tracker.avdtp_cid);
+    avrcp_disconnect(media_tracker.avrcp_cid);
+    aacp_disconnect();
+}
 
 void avdtp_disconnect_and_scan(){
     a2dp_demo_timer_stop(&media_tracker);

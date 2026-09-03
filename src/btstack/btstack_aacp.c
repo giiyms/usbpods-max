@@ -76,10 +76,10 @@ static const uint8_t aacp_mic_stop_bytes[] = {
 };
 
 // --- TX queue (ordered; one packet sent per CAN_SEND_NOW event) ---
-// Entries reference static const byte arrays only, so no payload copies.
+// Packets are copied so callers can reuse stack/static templates.
 typedef struct {
-    const uint8_t *data;
-    uint16_t       len;
+    uint8_t  data[32];
+    uint16_t len;
 } aacp_pkt_t;
 
 #define AACP_TX_QUEUE_LEN 8
@@ -105,6 +105,23 @@ static bool aacp_mic_want    = false;   // host wants the mic (USB alt 1),
                                         // start deferred until channel is up
 static btstack_timer_source_t aacp_mic_stats_timer;    // 1 Hz report
 
+// Parsed notifications (0xFF = unknown). Reset on channel close.
+static uint8_t aacp_bat_left  = 0xFF;
+static uint8_t aacp_bat_right = 0xFF;
+static uint8_t aacp_bat_case  = 0xFF;
+static uint8_t aacp_bat_head  = 0xFF;
+static uint8_t aacp_ear_left  = 0xFF;
+static uint8_t aacp_ear_right = 0xFF;
+static uint8_t aacp_noise_mode = 0;   // 0 unknown, 1-4 librepods ListeningMode
+static uint8_t aacp_ca        = 0;    // 0 unknown, 1 on, 2 off
+
+static void aacp_status_reset(void) {
+    aacp_bat_left = aacp_bat_right = aacp_bat_case = aacp_bat_head = 0xFF;
+    aacp_ear_left = aacp_ear_right = 0xFF;
+    aacp_noise_mode = 0;
+    aacp_ca = 0;
+}
+
 // RX statistics — cumulative since START, plus per-interval rates.
 static struct {
     uint32_t sdu_total;     // audio SDUs seen
@@ -128,6 +145,7 @@ void aacp_init(void) {
     aacp_tx_head     = 0;
     aacp_tx_count    = 0;
     aacp_mic_running = false;
+    aacp_status_reset();
 }
 
 static void aacp_do_connect(btstack_timer_source_t *ts) {
@@ -186,6 +204,7 @@ void aacp_disconnect(void) {
     aacp_connected = false;
     aacp_tx_head   = 0;
     aacp_tx_count  = 0;
+    aacp_status_reset();
 }
 
 bool aacp_is_connected(void) {
@@ -196,12 +215,16 @@ bool aacp_is_connected(void) {
 // TX queue
 
 static bool aacp_tx_enqueue(const uint8_t *data, uint16_t len) {
+    if (len > sizeof(aacp_tx_queue[0].data)) {
+        printf("[AACP] TX packet too large (%u)\n", len);
+        return false;
+    }
     if (aacp_tx_count >= AACP_TX_QUEUE_LEN) {
         printf("[AACP] TX queue full, dropping %u-byte packet\n", len);
         return false;
     }
     uint8_t slot = (uint8_t)((aacp_tx_head + aacp_tx_count) % AACP_TX_QUEUE_LEN);
-    aacp_tx_queue[slot].data = data;
+    memcpy(aacp_tx_queue[slot].data, data, len);
     aacp_tx_queue[slot].len  = len;
     aacp_tx_count++;
     if (aacp_cid != 0) l2cap_request_can_send_now_event(aacp_cid);
@@ -211,7 +234,7 @@ static bool aacp_tx_enqueue(const uint8_t *data, uint16_t len) {
 static void aacp_handle_can_send_now(void) {
     if (aacp_tx_count == 0) return;
     aacp_pkt_t *p = &aacp_tx_queue[aacp_tx_head];
-    uint8_t status = l2cap_send(aacp_cid, (uint8_t *) p->data, p->len);
+    uint8_t status = l2cap_send(aacp_cid, p->data, p->len);
     if (status != ERROR_CODE_SUCCESS) {
         printf("[AACP] l2cap_send failed: 0x%02x (retrying)\n", status);
         l2cap_request_can_send_now_event(aacp_cid);  // retry same packet
@@ -361,6 +384,113 @@ static void aacp_handle_audio_sdu(const uint8_t *sdu, uint16_t size) {
 }
 
 // ------------------------------------------------------------------
+// Notification parse (librepods docs — see AACP-FEATURES.md)
+// Header: 04 00 04 00 [opcode u16le] [payload]
+// Battery (opcode 0x0004): AAP Definitions —
+//   [count] ([component] 01 [level] [status] 01)*
+//   component: Right=0x02 Left=0x04 Case=0x08
+// Control (opcode 0x0009):  [identifier] [data1] [data2] ...
+//   0x0D ListeningMode: 1=Off 2=ANC 3=Transparency 4=Adaptive
+//   0x28 Conversation Detect: 1=enabled 2=disabled
+// Ear detection (opcode 0x0006): first two payload bytes are left/right
+//   placement in the layout used by librepods / AAP Definitions.
+// Logging only on *change* — these handlers share the A2DP run loop.
+
+static void aacp_handle_control(const uint8_t *pkt, uint16_t size) {
+    uint16_t opcode = little_endian_read_16(pkt, 4);
+    const uint8_t *p = pkt + 6;
+    uint16_t n = (uint16_t)(size - 6);
+
+    if (opcode == 0x0004 && n >= 1) {
+        uint8_t count = p[0];
+        uint16_t off = 1;
+        uint8_t l = aacp_bat_left, r = aacp_bat_right, c = aacp_bat_case, h = aacp_bat_head;
+        for (uint8_t i = 0; i < count && (uint16_t)(off + 5) <= n; i++, off += 5) {
+            uint8_t comp  = p[off];
+            uint8_t level = p[off + 2];
+            if (comp == 0x02) r = level;
+            else if (comp == 0x04) l = level;
+            else if (comp == 0x08) c = level;
+            else h = level;   // AirPods Max may report a single headset component
+        }
+        if (l != aacp_bat_left || r != aacp_bat_right || c != aacp_bat_case || h != aacp_bat_head) {
+            aacp_bat_left = l; aacp_bat_right = r; aacp_bat_case = c; aacp_bat_head = h;
+            printf("[AACP] battery L=%u R=%u case=%u headset=%u\n",
+                   (unsigned) l, (unsigned) r, (unsigned) c, (unsigned) h);
+        }
+        return;
+    }
+
+    if (opcode == 0x0009 && n >= 2) {
+        uint8_t id = p[0];
+        uint8_t v  = p[1];
+        if (id == 0x0D && v >= 1 && v <= 4 && v != aacp_noise_mode) {
+            aacp_noise_mode = v;
+            printf("[AACP] noise-control %u (1=off 2=anc 3=trans 4=adaptive)\n", (unsigned) v);
+        } else if (id == 0x28 && (v == 1 || v == 2) && v != aacp_ca) {
+            aacp_ca = v;
+            printf("[AACP] conversation-awareness %s\n", v == 1 ? "on" : "off");
+        }
+        return;
+    }
+
+    if (opcode == 0x0006 && n >= 1) {
+        uint8_t el = p[0];
+        uint8_t er = (n >= 2) ? p[1] : p[0];
+        if (el != aacp_ear_left || er != aacp_ear_right) {
+            aacp_ear_left = el;
+            aacp_ear_right = er;
+            printf("[AACP] ear L=%u R=%u\n", (unsigned) el, (unsigned) er);
+        }
+        return;
+    }
+
+    if (opcode == 0x004B && n >= 1) {
+        // Speaking/duck event — layout varies; do not decode levels here.
+        // Config on/off is control identifier 0x28 (above).
+        return;
+    }
+}
+
+static bool aacp_send_control_cmd(uint8_t id, uint8_t v1, uint8_t v2) {
+    if (aacp_cid == 0 || !aacp_connected) return false;
+    uint8_t pkt[] = {
+        0x04, 0x00, 0x04, 0x00, 0x09, 0x00,
+        id, v1, v2, 0x00, 0x00
+    };
+    return aacp_tx_enqueue(pkt, sizeof(pkt));
+}
+
+void aacp_get_battery(uint8_t *left, uint8_t *right, uint8_t *case_bat, uint8_t *headset) {
+    if (left) *left = aacp_bat_left;
+    if (right) *right = aacp_bat_right;
+    if (case_bat) *case_bat = aacp_bat_case;
+    if (headset) *headset = aacp_bat_head;
+}
+
+void aacp_get_ear(uint8_t *left, uint8_t *right) {
+    if (left) *left = aacp_ear_left;
+    if (right) *right = aacp_ear_right;
+}
+
+uint8_t aacp_get_noise_mode(void) { return aacp_noise_mode; }
+uint8_t aacp_get_ca(void)         { return aacp_ca; }
+
+bool aacp_set_noise_mode(uint8_t mode) {
+    if (mode < 1 || mode > 4) return false;
+    if (!aacp_send_control_cmd(0x0D, mode, 0x00)) return false;
+    aacp_noise_mode = mode;   // optimistic; AirPods echo via 0x0009
+    return true;
+}
+
+bool aacp_set_ca(uint8_t enable) {
+    if (enable != 1 && enable != 2) return false;
+    if (!aacp_send_control_cmd(0x28, enable, 0x00)) return false;
+    aacp_ca = enable;
+    return true;
+}
+
+// ------------------------------------------------------------------
 
 static void aacp_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size) {
     UNUSED(channel);
@@ -394,6 +524,7 @@ static void aacp_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *
                     aacp_tx_head   = 0;
                     aacp_tx_count  = 0;
                     aacp_mic_teardown();
+                    aacp_status_reset();
                     break;
                 default:
                     break;
@@ -412,6 +543,7 @@ static void aacp_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *
             // hundred-byte info bursts that must not stall the run loop.
             if (size >= 6 && packet[0] == 0x04 && packet[1] == 0x00 &&
                 packet[2] == 0x04 && packet[3] == 0x00) {
+                aacp_handle_control(packet, size);
                 if (!aacp_got_control) {
                     aacp_got_control = true;
                     printf("[AACP] control channel confirmed (first packet)\n");

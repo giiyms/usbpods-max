@@ -99,9 +99,9 @@ extern "C" {
 #endif
 
 //------------- CLASS -------------//
-#define CFG_TUD_CDC               1   // debug logging over USB serial (see debug_cdc.c)
+#define CFG_TUD_CDC               1   // debug logging + serial menu over USB serial
 #define CFG_TUD_MSC               0
-#define CFG_TUD_HID               0
+#define CFG_TUD_HID               1   // WebHID settings (gain / pair / status)
 #define CFG_TUD_MIDI              0
 #define CFG_TUD_AUDIO             1
 #define CFG_TUD_VENDOR            0
@@ -176,6 +176,11 @@ extern "C" {
 #define CFG_TUD_CDC_RX_BUFSIZE    256
 #define CFG_TUD_CDC_TX_BUFSIZE    512
 #define CFG_TUD_CDC_EP_BUFSIZE    64
+
+//--------------------------------------------------------------------
+// HID (WebHID control) CONFIGURATION
+//--------------------------------------------------------------------
+#define CFG_TUD_HID_EP_BUFSIZE    32
 
 #ifdef __cplusplus
 }

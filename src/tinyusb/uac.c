@@ -33,6 +33,8 @@
 
  #include "../btstack/btstack_avdtp_source.h"
  #include "../btstack/aacp_mic_dec.h"
+ #include "../mic_gain.h"
+ #include "../control.h"
  #include "pico/flash.h"
 
 
@@ -133,6 +135,7 @@
  void tinyusb_task(void){
     tud_task(); // TinyUSB device task
     debug_cdc_task(); // drain buffered stdout to the CDC console (same context as tud_task)
+    control_usb_task();
     audio_task();
  }
  
@@ -277,6 +280,35 @@ void tinyusb_control_task(void){
  // Helper for feature unit get requests
  static bool tud_audio_feature_unit_get_request(uint8_t rhport, audio_control_request_t const *request)
  {
+   if (request->bEntityID == UAC2_ENTITY_MIC_FEATURE_UNIT)
+   {
+     if (request->bControlSelector == AUDIO_FU_CTRL_MUTE && request->bRequest == AUDIO_CS_REQ_CUR)
+     {
+       audio_control_cur_1_t mute1 = { .bCur = mic_gain_get_mute() ? 1 : 0 };
+       return tud_audio_buffer_and_schedule_control_xfer(rhport, (tusb_control_request_t const *)request, &mute1, sizeof(mute1));
+     }
+     else if (request->bControlSelector == AUDIO_FU_CTRL_VOLUME)
+     {
+       if (request->bRequest == AUDIO_CS_REQ_RANGE)
+       {
+         audio_control_range_2_n_t(1) range_vol = {
+           .wNumSubRanges = tu_htole16(1),
+           .subrange[0] = { .bMin = tu_htole16(0),
+                            .bMax = tu_htole16(MIC_GAIN_DB_MAX * 256),
+                            .bRes = tu_htole16(256) }
+         };
+         return tud_audio_buffer_and_schedule_control_xfer(rhport, (tusb_control_request_t const *)request, &range_vol, sizeof(range_vol));
+       }
+       else if (request->bRequest == AUDIO_CS_REQ_CUR)
+       {
+         int16_t cur = (int16_t) (mic_gain_get_db() * 256);
+         audio_control_cur_2_t cur_vol = { .bCur = tu_htole16(cur) };
+         return tud_audio_buffer_and_schedule_control_xfer(rhport, (tusb_control_request_t const *)request, &cur_vol, sizeof(cur_vol));
+       }
+     }
+     return false;
+   }
+
    TU_ASSERT(request->bEntityID == UAC2_ENTITY_SPK_FEATURE_UNIT);
  
    if (request->bControlSelector == AUDIO_FU_CTRL_MUTE && request->bRequest == AUDIO_CS_REQ_CUR)
@@ -314,7 +346,29 @@ void tinyusb_control_task(void){
  static bool tud_audio_feature_unit_set_request(uint8_t rhport, audio_control_request_t const *request, uint8_t const *buf)
  {
    (void)rhport;
- 
+
+   if (request->bEntityID == UAC2_ENTITY_MIC_FEATURE_UNIT)
+   {
+     TU_VERIFY(request->bRequest == AUDIO_CS_REQ_CUR);
+     if (request->bControlSelector == AUDIO_FU_CTRL_MUTE)
+     {
+       TU_VERIFY(request->wLength == sizeof(audio_control_cur_1_t));
+       mic_gain_set_mute(((audio_control_cur_1_t const *)buf)->bCur != 0);
+       return true;
+     }
+     else if (request->bControlSelector == AUDIO_FU_CTRL_VOLUME)
+     {
+       TU_VERIFY(request->wLength == sizeof(audio_control_cur_2_t));
+       int16_t v = (int16_t) tu_le16toh(((audio_control_cur_2_t const *)buf)->bCur);
+       if (v < 0) v = 0;
+       int db = (v + 128) / 256;
+       if (db > MIC_GAIN_DB_MAX) db = MIC_GAIN_DB_MAX;
+       mic_gain_set_db((uint8_t) db);
+       return true;
+     }
+     return false;
+   }
+
    TU_ASSERT(request->bEntityID == UAC2_ENTITY_SPK_FEATURE_UNIT);
    TU_VERIFY(request->bRequest == AUDIO_CS_REQ_CUR);
  
@@ -367,7 +421,8 @@ void tinyusb_control_task(void){
      return tud_audio_clock_get_request(rhport, request);
    if (request->bEntityID == UAC2_ENTITY_MIC_CLOCK)
      return tud_audio_mic_clock_get_request(rhport, request);
-   if (request->bEntityID == UAC2_ENTITY_SPK_FEATURE_UNIT)
+   if (request->bEntityID == UAC2_ENTITY_SPK_FEATURE_UNIT ||
+       request->bEntityID == UAC2_ENTITY_MIC_FEATURE_UNIT)
      return tud_audio_feature_unit_get_request(rhport, request);
    else
    {
@@ -382,7 +437,8 @@ void tinyusb_control_task(void){
  {
    audio_control_request_t const *request = (audio_control_request_t const *)p_request;
  
-   if (request->bEntityID == UAC2_ENTITY_SPK_FEATURE_UNIT)
+   if (request->bEntityID == UAC2_ENTITY_SPK_FEATURE_UNIT ||
+       request->bEntityID == UAC2_ENTITY_MIC_FEATURE_UNIT)
      return tud_audio_feature_unit_set_request(rhport, request, buf);
    if (request->bEntityID == UAC2_ENTITY_CLOCK)
      return tud_audio_clock_set_request(rhport, request, buf);
@@ -510,6 +566,7 @@ void tinyusb_control_task(void){
    int16_t buf[USB_MIC_SAMPLE_RATE / 1000];   // 64 samples / ms, mono
    uint32_t got = aacp_mic_pcm_read(buf, TU_ARRAY_SIZE(buf));
    for (uint32_t i = got; i < TU_ARRAY_SIZE(buf); i++) buf[i] = 0;
+   mic_gain_apply(buf, TU_ARRAY_SIZE(buf));
 
    tud_audio_write(buf, sizeof(buf));
    return true;
