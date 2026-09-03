@@ -1,275 +1,866 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>USBPods Max</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg: #0e1116;
-      --panel: #171b22;
-      --line: #2a3140;
-      --text: #e8edf5;
-      --muted: #8b95a8;
-      --accent: #7eb6ff;
-      --good: #5bd39b;
-      --warn: #e6b84d;
-      --bad: #e06c75;
-      --btn: #243044;
+      --bg: #f5f2eb;
+      --card-bg: #ffffff;
+      --card-border: rgba(45, 38, 28, 0.08);
+      --card-shadow: 0 20px 48px -12px rgba(42, 34, 22, 0.08), 0 2px 6px rgba(0, 0, 0, 0.02);
+      --text-main: #1d1b18;
+      --text-muted: #746e65;
+      --text-tertiary: #a09a90;
+      --accent-dark: #1f1d1a;
+      --pill-bg: #eae6dd;
+      --pill-active-bg: #ffffff;
+      --pill-hover: #e2ddd3;
+      --hairline: rgba(45, 38, 28, 0.07);
+      --badge-bg: #f0ebe1;
+      --green: #2e7d32;
+      --green-bg: #e8f5e9;
+      --record-red: #d32f2f;
     }
-    * { box-sizing: border-box; }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
     body {
-      margin: 0;
-      font: 15px/1.45 "Segoe UI", system-ui, sans-serif;
-      background: var(--bg);
-      color: var(--text);
+      background-color: var(--bg);
+      color: var(--text-main);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      line-height: 1.5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      padding: 40px 20px 60px;
     }
-    header {
-      padding: 1.4rem 1.2rem 0.6rem;
-      max-width: 720px;
-      margin: 0 auto;
+
+    .container {
+      width: 100%;
+      max-width: 500px;
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
     }
-    h1 { font-size: 1.45rem; font-weight: 650; margin: 0 0 0.25rem; }
-    .sub { color: var(--muted); margin: 0; }
-    main { max-width: 720px; margin: 0 auto; padding: 0.8rem 1.2rem 3rem; }
-    .card {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 1rem 1.1rem;
-      margin: 0.8rem 0;
+
+    .page-intro {
+      text-align: center;
+      padding: 6px 12px;
     }
-    .row { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; }
-    button {
-      background: var(--btn);
-      color: var(--text);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 0.45rem 0.85rem;
+
+    .page-intro h1 {
+      font-family: 'Newsreader', Georgia, serif;
+      font-size: 34px;
+      font-weight: 500;
+      letter-spacing: -0.02em;
+      color: var(--text-main);
+      line-height: 1.15;
+      margin-bottom: 6px;
+    }
+
+    .page-intro p {
+      font-size: 13.5px;
+      color: var(--text-muted);
+      font-weight: 400;
+      letter-spacing: -0.01em;
+    }
+
+    .product-card {
+      background: var(--card-bg);
+      border-radius: 28px;
+      border: 1px solid var(--card-border);
+      box-shadow: var(--card-shadow);
+      padding: 28px 26px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    .product-card.is-off .live-controls {
+      opacity: 0.48;
+    }
+
+    .product-card.is-off .live-dot {
+      background: #b8b3a8;
+      box-shadow: none;
+    }
+
+    .device-header {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .status-meta-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .dongle-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--badge-bg);
+      padding: 4px 10px 4px 8px;
+      border-radius: 100px;
+      font-size: 11.5px;
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+
+    .dongle-badge .live-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #2e7d32;
+      box-shadow: 0 0 0 2.5px rgba(46, 125, 50, 0.18);
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .battery-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+      padding: 3px 8px;
+      background: var(--pill-bg);
+      border-radius: 6px;
+    }
+
+    .battery-icon {
+      width: 16px;
+      height: 9px;
+      border: 1.2px solid var(--text-muted);
+      border-radius: 2px;
+      padding: 1px;
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    .battery-icon::after {
+      content: '';
+      position: absolute;
+      right: -3px;
+      top: 2px;
+      width: 1.5px;
+      height: 3px;
+      background: var(--text-muted);
+      border-radius: 0 1px 1px 0;
+    }
+
+    .battery-level {
+      width: 0%;
+      height: 100%;
+      background: #2e7d32;
+      border-radius: 1px;
+    }
+
+    .btn-release {
+      background: none;
+      border: none;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-tertiary);
       cursor: pointer;
-      font: inherit;
+      padding: 4px 6px;
+      border-radius: 6px;
+      transition: color 0.15s, background 0.15s;
+      font-family: inherit;
     }
-    button:hover { border-color: var(--accent); }
-    button:disabled { opacity: 0.45; cursor: not-allowed; }
-    button.primary { background: #1d4f91; border-color: #3d7ad6; }
-    button.on { background: #1e4a38; border-color: var(--good); }
-    .pill {
-      display: inline-block;
-      padding: 0.15rem 0.55rem;
-      border-radius: 999px;
-      background: #222833;
-      color: var(--muted);
-      font-size: 0.85rem;
+
+    .btn-release:hover {
+      color: var(--text-main);
+      background: var(--pill-bg);
     }
-    .pill.up { color: var(--good); background: #173328; }
-    .pill.down { color: var(--bad); background: #3a1e22; }
-    label { color: var(--muted); display: block; margin-bottom: 0.35rem; }
-    input[type=range] { width: 100%; }
-    .gain-val { font-variant-numeric: tabular-nums; color: var(--accent); font-size: 1.2rem; }
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 1rem; }
-    @media (max-width: 540px) { .grid { grid-template-columns: 1fr; } }
-    .log {
-      font: 12px/1.4 ui-monospace, monospace;
+
+    .btn-connect[hidden],
+    .btn-release[hidden] {
+      display: none !important;
+    }
+
+    .btn-connect {
+      background: var(--accent-dark);
+      color: #ffffff;
+      border: none;
+      padding: 11px 18px;
+      border-radius: 100px;
+      font-size: 13.5px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      width: 100%;
+      margin-top: 4px;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+
+    .btn-connect:hover { opacity: 0.92; }
+    .btn-connect:active { transform: scale(0.98); }
+    .btn-connect:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    .connect-hint {
+      font-size: 11.5px;
+      color: var(--text-tertiary);
+      line-height: 1.4;
+    }
+
+    .product-card:not(.is-off) .connect-hint { display: none; }
+
+    .err {
+      color: var(--record-red);
+      font-size: 12px;
+      min-height: 1.2em;
+      line-height: 1.4;
+    }
+
+    .device-title-wrap {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .device-title {
+      font-family: 'Newsreader', Georgia, serif;
+      font-size: 26px;
+      font-weight: 500;
+      letter-spacing: -0.02em;
+      color: var(--text-main);
+      line-height: 1.2;
+    }
+
+    .device-sub-status {
+      font-size: 12px;
+      color: var(--text-muted);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px 10px;
+      line-height: 1.4;
+    }
+
+    .device-sub-status span {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .device-sub-status .sep {
+      color: var(--text-tertiary);
+      font-size: 10px;
+    }
+
+    .divider {
+      height: 1px;
+      background-color: var(--hairline);
+      width: 100%;
+    }
+
+    .section-label-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+
+    .section-title {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+    }
+
+    .section-hint {
+      font-size: 11.5px;
+      color: var(--text-tertiary);
+    }
+
+    .segmented-control {
+      background: var(--pill-bg);
+      border-radius: 12px;
+      padding: 3px;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 2px;
+      user-select: none;
+    }
+
+    .segment-btn {
+      background: transparent;
+      border: none;
+      padding: 8px 4px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-muted);
+      border-radius: 9px;
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.16s ease;
+      font-family: inherit;
+    }
+
+    .segment-btn:hover:not(.active):not(:disabled) {
+      color: var(--text-main);
+    }
+
+    .segment-btn.active {
+      background: var(--pill-active-bg);
+      color: var(--text-main);
+      font-weight: 600;
+      box-shadow: 0 2px 7px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+    }
+
+    .segment-btn:disabled {
+      cursor: not-allowed;
+    }
+
+    .gain-group {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .gain-val-badge {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-main);
+      background: var(--badge-bg);
+      padding: 2px 8px;
+      border-radius: 6px;
+    }
+
+    .slider-track-wrap {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    input[type="range"] {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 6px;
+      border-radius: 4px;
+      background: #eae5dc;
+      outline: none;
+      margin: 8px 0 4px;
+      cursor: pointer;
+    }
+
+    input[type="range"]:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: var(--accent-dark);
+      border: 2.5px solid #ffffff;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.22);
+      cursor: pointer;
+      transition: transform 0.1s ease;
+    }
+
+    input[type="range"]::-webkit-slider-thumb:active {
+      transform: scale(1.12);
+    }
+
+    .gain-ticks {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-tertiary);
+      font-family: 'JetBrains Mono', monospace;
+      padding: 0 2px;
+    }
+
+    .record-section {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .record-header-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .btn-record {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      background: var(--accent-dark);
+      color: #ffffff;
+      border: none;
+      padding: 6px 13px 6px 11px;
+      border-radius: 100px;
+      font-size: 12px;
+      font-weight: 500;
+      font-family: inherit;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+
+    .btn-record:hover { opacity: 0.92; }
+    .btn-record:active { transform: scale(0.98); }
+    .btn-record:disabled { opacity: 0.55; cursor: not-allowed; }
+    .btn-record.is-rec { background: var(--record-red); }
+
+    .record-dot {
+      width: 7px;
+      height: 7px;
+      background: #ff5252;
+      border-radius: 50%;
+    }
+
+    .clips-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-height: 0;
+    }
+
+    .clip-card {
+      background: #faf8f5;
+      border: 1px solid rgba(45, 38, 28, 0.05);
+      border-radius: 12px;
+      padding: 9px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .clip-left {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .clip-label {
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--text-main);
+    }
+
+    .clip-sub {
+      font-size: 11px;
+      color: var(--text-tertiary);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .clip-card audio {
+      width: 148px;
+      height: 28px;
+      flex-shrink: 0;
+    }
+
+    .quiet-notice {
+      background: #faf8f4;
+      border-left: 2.5px solid #d4cdc2;
+      border-radius: 0 8px 8px 0;
+      padding: 9px 12px;
+      font-size: 11.5px;
+      color: var(--text-muted);
+      line-height: 1.45;
+    }
+
+    details.buried-tools {
+      width: 100%;
+      border-top: 1px solid var(--hairline);
+      padding-top: 14px;
+    }
+
+    details.buried-tools summary {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+      cursor: pointer;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      user-select: none;
+    }
+
+    details.buried-tools summary::-webkit-details-marker { display: none; }
+    details.buried-tools summary:hover { color: var(--text-main); }
+
+    .summary-chevron {
+      font-size: 10px;
+      color: var(--text-tertiary);
+      transition: transform 0.2s;
+    }
+
+    details.buried-tools[open] .summary-chevron {
+      transform: rotate(180deg);
+    }
+
+    .tools-drawer {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      padding: 16px 0 4px;
+    }
+
+    .drawer-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .drawer-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-tertiary);
+    }
+
+    .drawer-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .drawer-item-title {
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .uf2-tag {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text-muted);
+      background: var(--pill-bg);
+      padding: 1px 6px;
+      border-radius: 4px;
+    }
+
+    .btn-secondary {
+      background: var(--pill-bg);
+      border: none;
+      color: var(--text-main);
+      font-size: 11.5px;
+      font-weight: 500;
+      font-family: inherit;
+      padding: 4px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.15s;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .btn-secondary:hover { background: var(--pill-hover); }
+    .btn-secondary:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-secondary.on {
+      background: var(--accent-dark);
+      color: #fff;
+    }
+
+    .pairing-sub {
+      font-size: 11.5px;
+      color: var(--text-muted);
+    }
+
+    .pair-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .findmy-copy {
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.45;
+    }
+
+    .headset-hero {
+      width: 100%;
+      height: 168px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 2px 0 6px;
+    }
+    .headset-hero svg {
+      width: 168px;
+      height: 168px;
+      overflow: visible;
+    }
+
+    #log {
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      font-size: 11px;
+      line-height: 1.45;
       white-space: pre-wrap;
-      max-height: 180px;
+      word-break: break-word;
+      max-height: 160px;
       overflow: auto;
-      color: var(--muted);
+      color: var(--text-muted);
+      background: #faf8f5;
+      border-radius: 8px;
+      padding: 8px 10px;
       margin: 0;
+      min-height: 48px;
     }
-    a { color: var(--accent); }
-    .warnbox {
-      border-color: #5a4a20;
-      background: #241e10;
-      color: #f0d9a0;
-      font-size: 0.92rem;
+
+    .page-footer {
+      text-align: center;
+      font-size: 11.5px;
+      color: var(--text-tertiary);
+      line-height: 1.4;
     }
-    .err { color: var(--bad); min-height: 1.2em; }
+
+    .page-footer a {
+      color: var(--text-muted);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .page-footer a:hover { color: var(--text-main); }
+
+    button:focus-visible,
+    input:focus-visible,
+    a:focus-visible,
+    summary:focus-visible {
+      outline: 2px solid var(--accent-dark);
+      outline-offset: 2px;
+    }
   </style>
 </head>
 <body>
-  <header>
-    <h1>USBPods Max</h1>
-    <p class="sub">AirPods control for the Pico 2 W dongle — Chrome or Edge, no driver.</p>
-  </header>
-  <main>
-    <div class="card warnbox">
-      If the Mac or PC’s own Bluetooth is connected to the AirPods, A2DP on this
-      dongle dies and speakers go silent. Disconnect the headset from the host
-      Bluetooth stack first. USB-C on AirPods Max 2 is playback-only — this
-      dongle is the 2-way path.
-    </div>
+  <div class="container">
+    <header class="page-intro">
+      <h1>Hear you.</h1>
+      <p>AirPods Max 2, through a Pico, as a USB headset. Chrome or Edge.</p>
+    </header>
 
-    <div class="card">
-      <div class="row">
-        <button class="primary" id="btnConnect">Connect device</button>
-        <button id="btnDisconnectApp" disabled>Release</button>
-        <span class="pill" id="connPill">not connected</span>
+    <main class="product-card is-off" id="card">
+      <div class="headset-hero" aria-hidden="true">
+        <svg viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M46 102 C46 54 68 34 100 34 C132 34 154 54 154 102" stroke="#d5d0c7" stroke-width="7" stroke-linecap="round"/>
+          <path d="M52 96 C52 58 71 41 100 41 C129 41 148 58 148 96" stroke="#b5b0a6" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="2 3"/>
+          <path d="M46 96 L46 116" stroke="#8e897e" stroke-width="3" stroke-linecap="round"/>
+          <path d="M154 96 L154 116" stroke="#8e897e" stroke-width="3" stroke-linecap="round"/>
+          <rect x="36" y="106" width="10" height="52" rx="5" fill="#c4bfb6"/>
+          <rect x="42" y="102" width="22" height="60" rx="11" fill="#e5e1d8" stroke="#8e897e" stroke-width="2"/>
+          <rect x="45" y="106" width="15" height="52" rx="7.5" fill="none" stroke="#ffffff" stroke-width="1.2" opacity="0.6"/>
+          <rect x="136" y="102" width="22" height="60" rx="11" fill="#e5e1d8" stroke="#8e897e" stroke-width="2"/>
+          <rect x="154" y="106" width="10" height="52" rx="5" fill="#c4bfb6"/>
+          <rect x="140" y="106" width="15" height="52" rx="7.5" fill="none" stroke="#ffffff" stroke-width="1.2" opacity="0.6"/>
+        </svg>
       </div>
-      <p class="err" id="err"></p>
-      <p class="sub" style="margin:0.6rem 0 0">
-        Pick <strong>TinyUSB BT</strong> (WebHID). If that list is empty, the page
-        falls back to the serial port named <strong>USBPods Max Console</strong>.
-      </p>
-    </div>
 
-    <div class="card">
-      <label>Mic gain boost <span class="gain-val" id="gainLabel">0 dB</span></label>
-      <input type="range" id="gain" min="0" max="24" value="0" disabled>
-      <p class="sub" style="margin:0.4rem 0 0">
-        Digital gain on the Pico after AAC-ELD decode (0 to +24 dB, default 0).
-        Soft-clip limiter; not HFP. Same control as Windows’ recording slider
-        (UAC Feature Unit) and the serial <code>gain</code> command.
-      </p>
-    </div>
+      <section class="device-header">
+        <div class="status-meta-row">
+          <div class="dongle-badge">
+            <span class="live-dot"></span>
+            <span id="connBadge">Not connected</span>
+          </div>
+          <div class="header-actions">
+            <div class="battery-indicator" title="AirPods Battery">
+              <div class="battery-icon">
+                <div class="battery-level" id="batFill"></div>
+              </div>
+              <span id="batPct">—</span>
+            </div>
+            <button class="btn-release" id="btnDisconnectApp" type="button" hidden title="Release WebHID / Web Serial">Release</button>
+          </div>
+        </div>
 
-    <div class="card">
-      <h2 style="margin:0 0 0.6rem;font-size:1.05rem">A/B mic clip</h2>
-      <p class="sub" style="margin:0 0 0.7rem">
-        Records 3 seconds from <code>TinyUSB BT</code> (browser mic, Chrome/Edge),
-        then plays it back. Turn the gain, record again, keep the last two.
-        Disable browser noise suppression so you hear the Pico’s decode + gain.
-      </p>
-      <div class="row">
-        <button class="primary" id="btnRec" type="button">Record 3s</button>
-        <span class="pill" id="recPill">idle</span>
-      </div>
-      <div id="clips" style="margin-top:0.8rem"></div>
-    </div>
+        <button class="btn-connect" id="btnConnect" type="button">Connect TinyUSB BT</button>
+        <p class="connect-hint">Pick TinyUSB BT (WebHID). Empty list falls back to the serial port named USBPods Max Console.</p>
+        <p class="err" id="err"></p>
 
-    <div class="card">
-      <h2 style="margin:0 0 0.6rem;font-size:1.05rem">Status</h2>
-      <div class="grid">
-        <div>A2DP <span class="pill" id="stA2dp">—</span></div>
-        <div>AACP <span class="pill" id="stAacp">—</span></div>
-        <div>Mic stream <span class="pill" id="stMic">—</span></div>
-        <div>Owns connection <span class="pill" id="stOwns">—</span></div>
-        <div>CA duck <span class="pill" id="stDuck">—</span></div>
-        <div>Slot <span class="pill" id="stSlot">—</span></div>
-        <div>Battery L/R <span id="stBat">—</span></div>
-        <div>Case / headset <span id="stBat2">—</span></div>
-        <div>Noise control <span id="stNoise">—</span></div>
-        <div>Conversation Awareness <span id="stCa">—</span></div>
-        <div>Ear L/R <span id="stEar">—</span></div>
-        <div>Last 0x0019 <span id="st19">—</span></div>
-        <div>Name / model <span id="stName">—</span></div>
-        <div>Address <span id="stAddr">—</span></div>
-      </div>
-    </div>
+        <div class="device-title-wrap">
+          <h2 class="device-title">Daniel’s AirPods Max</h2>
+        </div>
 
-    <div class="card">
-      <h2 style="margin:0 0 0.6rem;font-size:1.05rem">Noise control</h2>
-      <div class="row" id="noiseBtns">
-        <button data-noise="1" disabled>Off</button>
-        <button data-noise="2" disabled>ANC</button>
-        <button data-noise="3" disabled>Transparency</button>
-        <button data-noise="4" disabled>Adaptive</button>
-        <button data-ca="1" disabled>CA on</button>
-        <button data-ca="2" disabled>CA off</button>
-      </div>
-      <p class="sub" style="margin:0.5rem 0 0">AACP control <code>0x09 / 0x0D</code> from librepods. Max 2 has all four modes.</p>
-    </div>
+        <div class="device-sub-status">
+          <span id="stEar">—</span>
+          <span class="sep">/</span>
+          <span>Crown: <span id="stCrown">—</span></span>
+          <span class="sep">/</span>
+          <span>CA: <span id="stCa">—</span></span>
+          <span class="sep">/</span>
+          <span id="stRadio">—</span>
+          <span class="sep">/</span>
+          <span>Slot <span id="stSlot">—</span></span>
+          <span class="sep">/</span>
+          <span id="stAddr">—</span>
+        </div>
+      </section>
 
-    <div class="card">
-      <h2 style="margin:0 0 0.6rem;font-size:1.05rem">Max 2 host grab</h2>
-      <p class="sub" style="margin:0 0 0.6rem">
-        Handshake replays LibrePods control set: own=1, Connect Automatically
-        <code>0x20=0x01</code> (keeps this host). Allow Auto Connect
-        <code>0x36</code> is not sent (Android: <code>0x20</code> is the one used).
-        iPhone may still need “Connect only When Last Connected”.
-      </p>
-      <div class="row">
-        <span class="pill" id="stAutocon">auto-conn —</span>
-        <span class="pill" id="stAllowauto">0x36 not sent</span>
-        <span class="pill" id="stEaren">ear-detect —</span>
-        <span class="pill" id="stGest">gestures —</span>
-      </div>
-      <div class="row" style="margin-top:0.6rem">
-        <button data-onoff="autocon" data-v="1" disabled>Auto-connect on</button>
-        <button data-onoff="autocon" data-v="2" disabled>Auto-connect off</button>
-        <button data-onoff="ear" data-v="1" disabled>Ear detect on</button>
-        <button data-onoff="ear" data-v="2" disabled>Ear detect off</button>
-      </div>
-      <label style="margin-top:0.8rem">Rename (opcode 0x001A)</label>
-      <div class="row">
-        <input id="rename" maxlength="32" placeholder="AirPods Max" disabled
-               style="flex:1;min-width:12rem;background:#11151c;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:0.45rem 0.7rem;font:inherit">
-        <button id="btnRename" disabled>Rename</button>
-      </div>
-    </div>
+      <div class="divider"></div>
 
-    <div class="card">
-      <h2 style="margin:0 0 0.6rem;font-size:1.05rem">Crown, clicks, listening</h2>
-      <div class="row">
-        <button id="btnCrownDef" disabled>Crown default</button>
-        <button id="btnCrownRev" disabled>Crown reverse</button>
-        <button data-hold="1" disabled>Hold = noise</button>
-        <button data-hold="5" disabled>Hold = Siri</button>
-      </div>
-      <div class="row" style="margin-top:0.5rem">
-        <button data-onoff="autoans" data-v="1" disabled>Auto-answer on</button>
-        <button data-onoff="autoans" data-v="2" disabled>Auto-answer off</button>
-        <button data-onoff="adaptvol" data-v="1" disabled>Adapt vol on</button>
-        <button data-onoff="adaptvol" data-v="2" disabled>Adapt vol off</button>
-        <button data-onoff="sleep" data-v="1" disabled>Sleep on</button>
-        <button data-onoff="sleep" data-v="2" disabled>Sleep off</button>
-      </div>
-      <label style="margin-top:0.8rem">Chime volume <span class="gain-val" id="chimeLabel">50</span></label>
-      <input type="range" id="chime" min="0" max="100" value="50" disabled>
-      <p class="sub" style="margin:0.5rem 0 0">
-        Raw gestures 0x0F, listen mask 0x0F (Off|ANC|Trans|Adaptive), click/hold
-        mapped on the host from 0x0019 (LibrePods StemAction defaults).
-        0x14/0x15 are not sent — no packet values in LibrePods.
-      </p>
-    </div>
+      <div class="live-controls">
+        <section>
+          <div class="section-label-row">
+            <span class="section-title">Noise Control</span>
+          </div>
+          <div class="segmented-control" id="noiseBtns" role="radiogroup" aria-label="Noise Control Modes">
+            <button class="segment-btn" data-noise="1" disabled role="radio" aria-checked="false">Off</button>
+            <button class="segment-btn" data-noise="2" disabled role="radio" aria-checked="false">ANC</button>
+            <button class="segment-btn" data-noise="3" disabled role="radio" aria-checked="false">Transparency</button>
+            <button class="segment-btn" data-noise="4" disabled role="radio" aria-checked="false">Adaptive</button>
+          </div>
+        </section>
 
-    <div class="card">
-      <h2 style="margin:0 0 0.6rem;font-size:1.05rem">Pairing</h2>
-      <div class="row">
-        <button id="btnPair" disabled>Pair</button>
-        <button id="btnDrop" disabled>Disconnect</button>
-        <button id="btnRecon" disabled>Reconnect</button>
-        <button id="btnSlot1" disabled>Slot 1</button>
-        <button id="btnSlot2" disabled>Slot 2</button>
+        <section class="gain-group">
+          <div class="section-label-row">
+            <div>
+              <span class="section-title">Microphone Gain</span>
+              <span class="section-hint" style="margin-left: 6px;">· AAC-ELD decode on Pico</span>
+            </div>
+            <span class="gain-val-badge" id="gainLabel">0 dB</span>
+          </div>
+          <div class="slider-track-wrap">
+            <input type="range" id="gain" min="0" max="24" step="1" value="0" disabled aria-label="Microphone Gain Slider">
+            <div class="gain-ticks">
+              <span>0 dB</span>
+              <span>6 dB</span>
+              <span>12 dB</span>
+              <span>18 dB</span>
+              <span>24 dB</span>
+            </div>
+          </div>
+        </section>
       </div>
-      <p class="sub" style="margin:0.5rem 0 0">
-        Pair = long-press BOOTSEL on the Pico, then put the case in pairing mode.
-        Host Bluetooth must not own the headset.
-      </p>
-    </div>
 
-    <div class="card">
-      <h2 style="margin:0 0 0.6rem;font-size:1.05rem">Flash firmware</h2>
-      <p class="sub" style="margin:0 0 0.7rem">
-        Hold the Pico’s BOOTSEL button, unplug, plug back in, let go.
-        Copy the UF2 onto the <code>RP2350</code> drive. That’s how you switch
-        at work too. Chrome/Edge, no driver.
-      </p>
-      <div class="row">
-        <a href="firmware/usbpods-max.uf2" download="usbpods-max.uf2"><button class="primary" type="button">USBPods Max (this build)</button></a>
-        <a href="firmware/han-um-2way-v1.0.0.uf2" download="han-um-2way-v1.0.0.uf2"><button type="button">Original han-um 2-way</button></a>
+      <section class="record-section">
+        <div class="record-header-row">
+          <span class="section-title">Mic Loopback Check</span>
+          <button class="btn-record" id="btnRec" type="button">
+            <span class="record-dot"></span>
+            <span id="recordBtnText">Record 3s</span>
+          </button>
+        </div>
+        <div class="clips-stack" id="clips"></div>
+      </section>
+
+      <div class="quiet-notice">
+        If your Mac or PC Bluetooth connects directly to these AirPods, dongle A2DP will disconnect. USB-C on Max 2 is playback-only; this dongle provides the low-latency 2-way path.
       </div>
-    </div>
 
-    <div class="card">
-      <h2 style="margin:0 0 0.6rem;font-size:1.05rem">Log</h2>
-      <pre class="log" id="log"></pre>
-    </div>
+      <details class="buried-tools">
+        <summary>
+          <span>Dongle &amp; Firmware Tools</span>
+          <span class="summary-chevron">▼</span>
+        </summary>
+        <div class="tools-drawer">
+          <div class="drawer-group">
+            <span class="drawer-label">Pairing</span>
+            <p class="pairing-sub">Inquiry &amp; key exchange over TinyUSB BT. Host Bluetooth must not own the headset.</p>
+            <div class="pair-row">
+              <button class="btn-secondary" id="btnPair" type="button" disabled>Pair</button>
+              <button class="btn-secondary" id="btnDrop" type="button" disabled>Disconnect</button>
+              <button class="btn-secondary" id="btnRecon" type="button" disabled>Reconnect</button>
+              <button class="btn-secondary" id="btnSlot1" type="button" disabled>Slot 1</button>
+              <button class="btn-secondary" id="btnSlot2" type="button" disabled>Slot 2</button>
+            </div>
+          </div>
 
-    <p class="sub">
+          <div class="divider"></div>
+
+          <div class="drawer-group">
+            <span class="drawer-label">Spatial</span>
+            <div class="drawer-row">
+              <span class="pairing-sub">Serial only — no invented AACP opcode</span>
+              <button class="btn-secondary" id="btnSpatial" type="button">Spatial off</button>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="drawer-group">
+            <span class="drawer-label">Find My</span>
+            <p class="findmy-copy" id="stFindmy">network: Pico cannot join iCloud</p>
+            <p class="findmy-copy" id="stKeys">BLE keys: —</p>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="drawer-group">
+            <span class="drawer-label">Flash Pico Firmware (UF2)</span>
+            <p class="pairing-sub">Hold BOOTSEL, unplug, plug back in, copy onto the RP2350 drive.</p>
+            <div class="drawer-row">
+              <div class="drawer-item-title">
+                <span>usbpods-max.uf2</span>
+                <span class="uf2-tag">Standard</span>
+              </div>
+              <a class="btn-secondary" href="firmware/usbpods-max.uf2" download="usbpods-max.uf2">Download</a>
+            </div>
+            <div class="drawer-row">
+              <div class="drawer-item-title">
+                <span>han-um 2-way</span>
+                <span class="uf2-tag">Experimental</span>
+              </div>
+              <a class="btn-secondary" href="firmware/han-um-2way-v1.0.0.uf2" download="han-um-2way-v1.0.0.uf2">Download</a>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="drawer-group">
+            <span class="drawer-label">Log</span>
+            <pre id="log"></pre>
+          </div>
+        </div>
+      </details>
+    </main>
+
+    <footer class="page-footer">
       Protocol: <a href="PROTOCOL.md">PROTOCOL.md</a>
       · Features: <a href="AACP-FEATURES.md">AACP-FEATURES.md</a>
-      · This page is static (GitHub Pages). HTTPS or localhost required for WebHID / Web Serial.
-    </p>
-  </main>
+      · HTTPS or localhost required for WebHID / Web Serial
+    </footer>
+  </div>
+
   <script>
     const VID = 0xCafe;
     const USAGE_PAGE = 0xFFA0;
     const REPORT_LEN = 32;
-    const CMD = {
-      STATUS: 1, GAIN: 2, PAIR: 3, DISCONNECT: 4, RECONNECT: 5, SLOT: 6, NOISE: 7, CA: 8,
-      CROWN: 9, AUTOANS: 0x0A, CHIME: 0x0B, ADAPT: 0x0C, SLEEP: 0x0D, LISTEN: 0x0E,
-      RENAME: 0x0F, EAR: 0x10, GESTURES: 0x11, HOLD: 0x12, AUTOCONN: 0x13
-    };
+    const CMD = { STATUS: 1, GAIN: 2, PAIR: 3, DISCONNECT: 4, RECONNECT: 5, SLOT: 6, NOISE: 7, CA: 8 };
 
     let hid = null;
     let serial = null;
@@ -278,6 +869,8 @@
     let serialBuf = "";
     let pollTimer = null;
     let gainDebounce = null;
+    let spatialOn = false;
+    let lastCrown = "—";
 
     const $ = (id) => document.getElementById(id);
     const log = (m) => {
@@ -287,44 +880,73 @@
     };
     const setErr = (m) => { $("err").textContent = m || ""; };
 
-    function bat(v) { return v === 255 || v === undefined ? "—" : v + "%"; }
+    const LIVE_IDS = ["gain", "btnPair", "btnDrop", "btnRecon", "btnSlot1", "btnSlot2"];
+
+    function bat(v) { return v === 255 || v === undefined || Number.isNaN(v) ? "—" : v + "%"; }
+    function batValid(v) { return typeof v === "number" && !Number.isNaN(v) && v !== 255; }
+
     function noiseName(n) {
       return { 1: "Off", 2: "ANC", 3: "Transparency", 4: "Adaptive" }[n] || "unknown";
     }
-    function pill(el, up, label) {
-      el.textContent = label;
-      el.className = "pill " + (up ? "up" : "down");
+
+    function earLabel(l, r) {
+      const unk = (v) => v === 255 || v === undefined || Number.isNaN(v);
+      if (unk(l) && unk(r)) return "—";
+      // AAP / opcode 0x0006: 0 = on head (in-ear / worn)
+      const onL = !unk(l) && l === 0;
+      const onR = !unk(r) && r === 0;
+      const offL = !unk(l) && l !== 0;
+      const offR = !unk(r) && r !== 0;
+      if (offL || offR) return "Off head";
+      if (onL || onR) return "On head";
+      return "—";
+    }
+
+    function caLabel(ca) {
+      if (ca === 1) return "on";
+      if (ca === 2) return "off";
+      if (ca === 3) return "duck";
+      return "—";
+    }
+
+    function radioLabel(s) {
+      return "A2DP " + (s.a2dp ? "up" : "down") +
+        " · AACP " + (s.aacp ? "up" : "down") +
+        " · mic " + (s.mic ? "on" : "off");
+    }
+
+    function setBattery(s) {
+      let pct = null;
+      if (batValid(s.bat_h)) pct = s.bat_h;
+      else if (batValid(s.bat_l) || batValid(s.bat_r)) {
+        if (batValid(s.bat_l) && batValid(s.bat_r) && s.bat_l !== s.bat_r) {
+          $("batPct").textContent = bat(s.bat_l) + " / " + bat(s.bat_r);
+          pct = Math.round((s.bat_l + s.bat_r) / 2);
+          $("batFill").style.width = pct + "%";
+          return;
+        }
+        pct = batValid(s.bat_l) ? s.bat_l : s.bat_r;
+      }
+      $("batPct").textContent = pct == null ? "—" : pct + "%";
+      $("batFill").style.width = pct == null ? "0%" : pct + "%";
     }
 
     function applyStatus(s) {
-      pill($("stA2dp"), s.a2dp, s.a2dp ? "up" : "down");
-      pill($("stAacp"), s.aacp, s.aacp ? "up" : "down");
-      pill($("stMic"), s.mic, s.mic ? "on" : "off");
-      pill($("stOwns"), s.owns === 1 || s.owns === true, s.owns === 1 || s.owns === true ? "own" : "not");
-      pill($("stDuck"), !!s.duck, s.duck ? "ducking" : "idle");
+      $("stEar").textContent = earLabel(s.ear_l, s.ear_r);
+      $("stCrown").textContent = lastCrown;
+      $("stCa").textContent = caLabel(s.ca);
+      $("stRadio").textContent = radioLabel(s);
       $("stSlot").textContent = s.slot || "—";
-      $("stSlot").className = "pill";
-      $("stBat").textContent = bat(s.bat_l) + " / " + bat(s.bat_r);
-      $("stBat2").textContent = bat(s.bat_c) + " / " + bat(s.bat_h);
-      $("stNoise").textContent = noiseName(s.noise);
-      $("stCa").textContent = s.ca === 1 ? "on" : s.ca === 2 ? "off" : "—";
-      $("stEar").textContent = (s.ear_l === 255 ? "—" : s.ear_l) + " / " + (s.ear_r === 255 ? "—" : s.ear_r);
-      $("st19").textContent = s.last19 || "—";
-      $("stName").textContent = (s.name && s.name !== "-") ? (s.name + (s.model && s.model !== "-" ? " / " + s.model : "")) : "—";
       $("stAddr").textContent = s.addr || "—";
-      $("stAutocon").textContent = "auto-conn " + (s.autocon === 1 ? "on" : s.autocon === 2 ? "off" : "—");
-      $("stEaren").textContent = "ear-detect " + (s.earen === 1 ? "on" : s.earen === 2 ? "off" : "—");
-      $("stGest").textContent = "gestures 0x" + (typeof s.gestures === "number" ? s.gestures.toString(16) : "—");
+      setBattery(s);
       if (typeof s.gain === "number" && !Number.isNaN(s.gain)) {
         $("gain").value = s.gain;
         $("gainLabel").textContent = s.gain + " dB";
       }
-      if (typeof s.chime === "number" && !Number.isNaN(s.chime)) {
-        $("chime").value = s.chime;
-        $("chimeLabel").textContent = s.chime;
-      }
-      document.querySelectorAll("#noiseBtns [data-noise]").forEach((b) => {
-        b.classList.toggle("on", Number(b.dataset.noise) === s.noise);
+      document.querySelectorAll("#noiseBtns button").forEach((b) => {
+        const on = Number(b.dataset.noise) === s.noise;
+        b.classList.toggle("active", on);
+        b.setAttribute("aria-checked", on ? "true" : "false");
       });
     }
 
@@ -332,19 +954,12 @@
       const u = new Uint8Array(buf);
       if (u[0] !== 1) return;
       const flags = u[1];
-      const flags2 = u[15];
       const addr = [...u.slice(16, 22)].map((b) => b.toString(16).padStart(2, "0")).join(":");
-      const t19 = u[27], b19 = u[28];
       applyStatus({
         a2dp: !!(flags & 1), aacp: !!(flags & 2), mic: !!(flags & 4),
         gain: u[2], slot: u[3],
         bat_l: u[4], bat_r: u[5], bat_c: u[6], bat_h: u[7],
         noise: u[8], ear_l: u[9], ear_r: u[10], ca: u[11],
-        owns: flags2 & 1 ? 1 : 2, duck: !!(flags2 & 2),
-        autocon: flags2 & 4 ? 1 : 2, earen: flags2 & 8 ? 1 : 2,
-        chime: u[22], crown: u[23], listen: u[24], gestures: u[25], hold: u[26],
-        last19: (t19 || b19) ? (t19.toString(16).padStart(2, "0") + " " + b19.toString(16).padStart(2, "0")) : "",
-        autoans: u[29], adaptvol: u[30], sleep: u[31],
         addr: addr === "00:00:00:00:00:00" ? "—" : addr
       });
     }
@@ -368,34 +983,42 @@
         bat_l: Number(kv.bat_l), bat_r: Number(kv.bat_r),
         bat_c: Number(kv.bat_c), bat_h: Number(kv.bat_h),
         noise: Number(kv.noise), ear_l: Number(kv.ear_l), ear_r: Number(kv.ear_r),
-        ca: Number(kv.ca), addr: kv.addr,
-        owns: Number(kv.owns), duck: kv.duck === "1",
-        autocon: Number(kv.autocon), allowauto: Number(kv.allowauto),
-        earen: Number(kv.earen), gestures: Number(kv.gestures), hold: Number(kv.hold),
-        crown: Number(kv.crown), autoans: Number(kv.autoans), chime: Number(kv.chime),
-        adaptvol: Number(kv.adaptvol), sleep: Number(kv.sleep), listen: Number(kv.listen),
-        last19: kv.last19, name: kv.name, model: kv.model, serial: kv.serial, fw: kv.fw
+        ca: Number(kv.ca), addr: kv.addr
       });
     }
 
+    function setLiveEnabled(on) {
+      LIVE_IDS.forEach((id) => { $(id).disabled = !on; });
+      document.querySelectorAll("#noiseBtns button").forEach((b) => { b.disabled = !on; });
+    }
+
     function setConnected(kind) {
-      $("connPill").textContent = kind;
-      $("connPill").className = "pill up";
-      $("btnConnect").disabled = true;
-      $("btnDisconnectApp").disabled = false;
-      ["gain", "chime", "rename", "btnRename", "btnPair", "btnDrop", "btnRecon", "btnSlot1", "btnSlot2",
-       "btnCrownDef", "btnCrownRev"].forEach((id) => { const el = $(id); if (el) el.disabled = false; });
-      document.querySelectorAll("#noiseBtns button, [data-onoff], [data-hold], [data-ca]").forEach((b) => { b.disabled = false; });
+      const badge = kind.indexOf("Serial") >= 0 ? "Web Serial" : "WebHID";
+      $("connBadge").textContent = badge;
+      $("card").classList.remove("is-off");
+      $("btnConnect").hidden = true;
+      $("btnDisconnectApp").hidden = false;
+      setLiveEnabled(true);
     }
 
     function setDisconnected() {
-      $("connPill").textContent = "not connected";
-      $("connPill").className = "pill down";
-      $("btnConnect").disabled = false;
-      $("btnDisconnectApp").disabled = true;
-      ["gain", "chime", "rename", "btnRename", "btnPair", "btnDrop", "btnRecon", "btnSlot1", "btnSlot2",
-       "btnCrownDef", "btnCrownRev"].forEach((id) => { const el = $(id); if (el) el.disabled = true; });
-      document.querySelectorAll("#noiseBtns button, [data-onoff], [data-hold], [data-ca]").forEach((b) => { b.disabled = true; b.classList.remove("on"); });
+      $("connBadge").textContent = "Not connected";
+      $("card").classList.add("is-off");
+      $("btnConnect").hidden = false;
+      $("btnDisconnectApp").hidden = true;
+      setLiveEnabled(false);
+      document.querySelectorAll("#noiseBtns button").forEach((b) => {
+        b.classList.remove("active");
+        b.setAttribute("aria-checked", "false");
+      });
+      $("stEar").textContent = "—";
+      $("stCa").textContent = "—";
+      $("stRadio").textContent = "—";
+      $("stSlot").textContent = "—";
+      $("stAddr").textContent = "—";
+      $("stCrown").textContent = lastCrown;
+      $("batPct").textContent = "—";
+      $("batFill").style.width = "0%";
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
     }
 
@@ -403,8 +1026,7 @@
       if (!hid) return;
       const buf = new Uint8Array(REPORT_LEN);
       buf[0] = cmd;
-      if (arg instanceof Uint8Array) buf.set(arg, 1);
-      else if (arg !== undefined) buf[1] = arg;
+      if (arg !== undefined) buf[1] = arg;
       await hid.sendReport(0, buf);
     }
 
@@ -416,6 +1038,11 @@
     async function sendCmd(cmd, arg, serialLine) {
       if (hid) await sendHid(cmd, arg);
       else if (serialWriter) await sendSerial(serialLine);
+    }
+
+    function noteCrown(line) {
+      lastCrown = line.trim().slice(0, 80);
+      $("stCrown").textContent = lastCrown;
     }
 
     async function connectHid() {
@@ -431,7 +1058,7 @@
       hid.addEventListener("disconnect", () => { hid = null; setDisconnected(); log("HID disconnected"); });
       await sendHid(CMD.STATUS);
       pollTimer = setInterval(() => sendHid(CMD.STATUS), 1000);
-      setConnected("WebHID · TinyUSB BT");
+      setConnected("WebHID");
       log("Connected via WebHID");
     }
 
@@ -442,7 +1069,7 @@
       serial = port;
       serialWriter = port.writable.getWriter();
       serialReader = port.readable.getReader();
-      setConnected("Web Serial · USBPods Max Console");
+      setConnected("Web Serial");
       log("Connected via Web Serial");
       await sendSerial("status");
       pollTimer = setInterval(() => sendSerial("status"), 1000);
@@ -458,6 +1085,12 @@
               const line = serialBuf.slice(0, n).replace(/\r$/, "");
               serialBuf = serialBuf.slice(n + 1);
               if (line.startsWith("@")) parseAtLine(line);
+              else if (/0x0019/i.test(line)) {
+                noteCrown(line);
+                log(line);
+              } else if (line && !line.startsWith("@STATUS")) {
+                if (/^\[(AACP|HID|EAR|MIC|DEC|CA)\]/i.test(line)) log(line);
+              }
             }
           }
         } catch (e) {
@@ -511,7 +1144,7 @@
     $("btnRecon").onclick = () => sendCmd(CMD.RECONNECT, 0, "reconnect");
     $("btnSlot1").onclick = () => sendCmd(CMD.SLOT, 1, "slot 1");
     $("btnSlot2").onclick = () => sendCmd(CMD.SLOT, 2, "slot 2");
-    document.querySelectorAll("#noiseBtns [data-noise]").forEach((b) => {
+    document.querySelectorAll("#noiseBtns button").forEach((b) => {
       b.onclick = () => {
         const m = Number(b.dataset.noise);
         const names = { 1: "off", 2: "anc", 3: "trans", 4: "adaptive" };
@@ -519,68 +1152,25 @@
       };
     });
 
-
-    document.querySelectorAll("[data-onoff]").forEach((b) => {
-      b.onclick = () => {
-        const kind = b.dataset.onoff;
-        const v = Number(b.dataset.v);
-        const map = {
-          autocon: [CMD.AUTOCONN, "autocon "],
-          ear: [CMD.EAR, "ear "],
-          autoans: [CMD.AUTOANS, "autoans "],
-          adaptvol: [CMD.ADAPT, "adaptvol "],
-          sleep: [CMD.SLEEP, "sleep "]
-        };
-        const m = map[kind];
-        if (!m) return;
-        sendCmd(m[0], v, m[1] + (v === 1 ? "on" : "off"));
-      };
-    });
-    document.querySelectorAll("[data-ca]").forEach((b) => {
-      b.onclick = () => {
-        const v = Number(b.dataset.ca);
-        sendCmd(CMD.CA, v, "ca " + (v === 1 ? "on" : "off"));
-      };
-    });
-    document.querySelectorAll("[data-hold]").forEach((b) => {
-      b.onclick = () => {
-        const v = Number(b.dataset.hold);
-        sendCmd(CMD.HOLD, v, "hold " + (v === 1 ? "noise" : "siri"));
-      };
-    });
-    $("btnCrownDef").onclick = () => sendCmd(CMD.CROWN, 2, "crown default");
-    $("btnCrownRev").onclick = () => sendCmd(CMD.CROWN, 1, "crown reverse");
-    $("btnRename").onclick = () => {
-      const name = $("rename").value.trim();
-      if (!name) return;
-      if (hid) {
-        const enc = new TextEncoder().encode(name.slice(0, 32));
-        const arg = new Uint8Array(1 + enc.length);
-        arg[0] = enc.length;
-        arg.set(enc, 1);
-        sendHid(CMD.RENAME, arg);
-      } else sendSerial("rename " + name);
+    $("btnSpatial").onclick = () => {
+      const next = !spatialOn;
+      if (!hid && !serialWriter) {
+        log("spatial " + (next ? "on" : "off") + " (no-op; not connected)");
+        return;
+      }
+      if (!serialWriter) {
+        log("spatial " + (next ? "on" : "off") + " (no-op; serial-only, no CDC writer)");
+        return;
+      }
+      spatialOn = next;
+      $("btnSpatial").classList.toggle("on", spatialOn);
+      $("btnSpatial").textContent = spatialOn ? "Spatial on" : "Spatial off";
+      sendSerial(spatialOn ? "spatial on" : "spatial off");
+      log("spatial " + (spatialOn ? "on" : "off"));
     };
-    let chimeDebounce = null;
-    $("chime").oninput = () => {
-      $("chimeLabel").textContent = $("chime").value;
-      clearTimeout(chimeDebounce);
-      chimeDebounce = setTimeout(() => {
-        const v = Number($("chime").value);
-        sendCmd(CMD.CHIME, v, "chime " + v);
-      }, 80);
-    };
-
-
 
     const clipsEl = $("clips");
-    const recPill = $("recPill");
     let recording = false;
-
-    function recState(label, up) {
-      recPill.textContent = label;
-      recPill.className = "pill " + (up ? "up" : "down");
-    }
 
     async function pickMicId() {
       const devices = await navigator.mediaDevices.enumerateDevices();
@@ -613,16 +1203,21 @@
     function addClip(blob, gainDb, srcLabel) {
       const url = URL.createObjectURL(blob);
       const wrap = document.createElement("div");
-      wrap.style.margin = "0.55rem 0";
-      const meta = document.createElement("div");
-      meta.className = "sub";
-      meta.textContent = gainDb + " dB · " + srcLabel;
+      wrap.className = "clip-card";
+      const left = document.createElement("div");
+      left.className = "clip-left";
+      const lab = document.createElement("span");
+      lab.className = "clip-label";
+      lab.textContent = gainDb + " dB · " + srcLabel;
+      const sub = document.createElement("span");
+      sub.className = "clip-sub";
+      sub.textContent = "0:03";
+      left.appendChild(lab);
+      left.appendChild(sub);
       const audio = document.createElement("audio");
       audio.controls = true;
       audio.src = url;
-      audio.style.width = "100%";
-      audio.style.marginTop = "0.25rem";
-      wrap.appendChild(meta);
+      wrap.appendChild(left);
       wrap.appendChild(audio);
       clipsEl.insertBefore(wrap, clipsEl.firstChild);
       while (clipsEl.children.length > 2) {
@@ -637,8 +1232,9 @@
       if (recording) return;
       recording = true;
       $("btnRec").disabled = true;
+      $("btnRec").classList.add("is-rec");
       setErr("");
-      recState("requesting mic…", false);
+      $("recordBtnText").textContent = "Rec 3s…";
       let stream = null;
       let ctx = null;
       try {
@@ -658,7 +1254,7 @@
           delete audio.deviceId;
           stream = await navigator.mediaDevices.getUserMedia({ audio });
         }
-        recState("recording 3s · " + pick.label, true);
+        $("recordBtnText").textContent = "Recording…";
         log("mic clip from: " + pick.label);
         ctx = new AudioContext();
         const src = ctx.createMediaStreamSource(stream);
@@ -682,21 +1278,19 @@
         const blob = pcmToWav(pcm, ctx.sampleRate);
         const g = $("gain").value;
         addClip(blob, g, pick.label);
-        recState("idle", true);
         log("saved 3s clip at " + g + " dB (" + Math.round(pcm.length / ctx.sampleRate * 10) / 10 + "s)");
       } catch (e) {
         setErr(e.message);
-        recState("failed", false);
         log("record failed: " + e.message);
       } finally {
         if (ctx) try { await ctx.close(); } catch (_) {}
         if (stream) stream.getTracks().forEach((t) => t.stop());
         recording = false;
         $("btnRec").disabled = false;
+        $("btnRec").classList.remove("is-rec");
+        $("recordBtnText").textContent = "Record 3s";
       }
     };
-
-
 
     if (location.protocol !== "https:" && location.hostname !== "localhost" && location.hostname !== "127.0.0.1") {
       setErr("Open this page over HTTPS (GitHub Pages) or http://localhost — browsers block WebHID/Web Serial on file://");
