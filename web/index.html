@@ -2081,7 +2081,7 @@
       const vol = snap ? snap.vol : "—";
       const mute = snap ? snap.mute : "—";
       const duck = snap ? snap.duck : "—";
-      const volNote = vol === "—" ? "— (serial @STATUS only)" : vol + " AVRCP";
+      const volNote = vol === "—" ? "— (serial @STATUS only)" : vol;
       el.innerHTML = [
         pill("A2DP", a2dp, a2dp === "up" ? "ok" : (a2dp === "down" ? "warn" : "")),
         pill("AVRCP vol", volNote, ""),
@@ -2899,6 +2899,10 @@
     paintSilentHints();
     drawScope($("micCanvas"), null, "#9c9486");
     drawScope($("spkCanvas"), null, "#9c9486");
+    paintMeter("micPeakFill", "micPeakDb", -Infinity);
+    paintMeter("micRmsFill", "micRmsDb", -Infinity);
+    paintMeter("spkPeakFill", "spkPeakDb", -Infinity);
+    paintMeter("spkRmsFill", "spkRmsDb", -Infinity);
     setInterval(heartbeat, 10000);
     window.addEventListener("resize", () => {
       drawScope($("micCanvas"), micMon.open ? micMon.analyser : null, micMon.open ? "#257a38" : "#9c9486");
