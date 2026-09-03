@@ -28,6 +28,9 @@
 #include "../hid_consumer.h"
 #include "../pico_w_led.h"
 
+// A2DP streaming is the play-status signal (play_info.status is never updated).
+bool check_is_streaming(void);
+
 #define AACP_PSM              0x1001
 // Requested local MTU. BTstack clamps this to l2cap_max_mtu() =
 // HCI_ACL_PAYLOAD_SIZE - 4 (currently 1691), which is what actually gets
@@ -131,21 +134,25 @@ static uint8_t aacp_sleep_det = 1;
 static uint8_t aacp_listen_mask = 0x0F;
 static uint8_t aacp_ca_duck_q8 = 255; // 255 = full (no duck)
 static uint8_t aacp_ca_level  = 0;
-static char    aacp_dev_name[24];
+static char    aacp_dev_name[32];
 static char    aacp_dev_model[16];
 static char    aacp_dev_serial[16];
-static char    aacp_dev_fw[20];
+static char    aacp_dev_fw[24];
 static char    aacp_last19_hex[28];
 static uint8_t aacp_last19_type = 0;
 static uint8_t aacp_last19_bud  = 0;
+static uint32_t aacp_imu_last_log_ms = 0;
 
 // Auto-pause: AAP Definitions 0x00=InEar (ON HEAD), 0x01=Out, 0x02=InCase.
-// Max 2 0x00/0x00 while worn is ON. Debounce ~200ms. Pause only on remove.
+// Max 2 0x00/0x00 while worn is ON. Debounce ~200ms.
+// Apple-style: take-off Pause only if playing (resume_pending); put-on Play
+// only if resume_pending. Never HID Play/Pause toggle. First packet: no HID.
 #define EAR_DEBOUNCE_MS 200
 static bool aacp_ear_known = false;
 static bool aacp_ear_off_head = false;
 static bool aacp_ear_pending = false;
 static bool aacp_ear_pending_off = false;
+static bool aacp_resume_pending = false;
 static btstack_timer_source_t aacp_ear_timer;
 
 static bool aacp_send_control_cmd(uint8_t id, uint8_t v1, uint8_t v2);
@@ -162,6 +169,7 @@ static void aacp_status_reset(void) {
     aacp_ear_known = false;
     aacp_ear_off_head = false;
     aacp_ear_pending = false;
+    aacp_resume_pending = false;
     aacp_last19_hex[0] = 0;
     aacp_last19_type = 0;
     aacp_last19_bud = 0;
@@ -524,13 +532,34 @@ static void aacp_ear_timer_fired(btstack_timer_source_t *ts) {
     if (!aacp_ear_known) {
         aacp_ear_known = true;
         aacp_ear_off_head = now_off;
-        return;
+        return; // first ear packet after connect: do not start Music
     }
     if (now_off == aacp_ear_off_head) return;
     aacp_ear_off_head = now_off;
-    // Pause only on remove; play on put-back. Consumer Play/Pause is a toggle.
-    hid_consumer_play_pause();
-    printf("[AACP] ear %s → HID Play/Pause\n", now_off ? "OFF-HEAD" : "ON-HEAD");
+
+    // 0x00 = on-head (AAP Definitions). Do not invert. Discrete Play/Pause
+    // — never HID Play/Pause toggle (that starts Music when already paused).
+    if (now_off) {
+        // Take off: Pause only if media is playing, then remember to resume.
+        // play_info.status is never updated; A2DP streaming is the playing signal.
+        bool playing = check_is_streaming();
+        if (playing) {
+            hid_consumer_pause();
+            aacp_resume_pending = true;
+            printf("[AACP] ear OFF-HEAD → HID Pause (resume pending)\n");
+        } else {
+            printf("[AACP] ear OFF-HEAD (already paused, no HID)\n");
+        }
+    } else {
+        // Put on: Play only if we paused on take-off. Stay paused otherwise.
+        if (aacp_resume_pending) {
+            hid_consumer_play();
+            aacp_resume_pending = false;
+            printf("[AACP] ear ON-HEAD → HID Play (resume)\n");
+        } else {
+            printf("[AACP] ear ON-HEAD (stay paused)\n");
+        }
+    }
 }
 
 static void aacp_ear_consider(uint8_t el, uint8_t er) {
@@ -558,29 +587,67 @@ static void aacp_copy_cstr(char *dst, size_t dstsz, const char *src) {
     dst[n] = 0;
 }
 
+static bool aacp_field_is_text(const uint8_t *s, uint16_t n) {
+    if (n == 0) return false;
+    uint16_t printable = 0;
+    for (uint16_t i = 0; i < n; i++) {
+        uint8_t c = s[i];
+        if (c < 0x20 || c == 0x7F) return false;
+        if (c < 0x80) printable++;
+        else printable++;
+    }
+    return printable >= 2;
+}
+
+static bool aacp_field_is_utf16le(const uint8_t *s, uint16_t n) {
+    if (n < 4 || (n % 2) != 0) return false;
+    for (uint16_t i = 0; i + 1 < n; i += 2) {
+        if (s[i + 1] != 0) return false;
+        if (s[i] < 0x20 || s[i] >= 0x7F) return false;
+    }
+    return true;
+}
+
 static void aacp_parse_device_info(const uint8_t *p, uint16_t n) {
-    // Android parseInformationPacket: skip leading zeros, collect C-strings.
-    // Order (AAP Definitions): name, model, manufacturer, serial, fw, …
-    char tmp[24];
-    uint8_t field = 0;
+    // AAP Definitions 0x001D: null-terminated strings after a short binary
+    // prefix (example starts `02 d5 00 04 00` then "AirPods Pro"). Live Max 2
+    // was parsed as C-strings and put garbage in name/model, serial=A3454,
+    // fw='Apple Inc.'. Skip non-text; accept UTF-8 or UTF-16LE ASCII.
+    // Order: name, model, manufacturer, serial, firmware.
+    char fields[5][32];
+    memset(fields, 0, sizeof(fields));
+    uint8_t got = 0;
     uint16_t i = 0;
-    while (i < n && p[i] == 0) i++;
-    while (i < n && field < 12) {
+    while (i < n && got < 5) {
         while (i < n && p[i] == 0) i++;
         if (i >= n) break;
         uint16_t start = i;
         while (i < n && p[i] != 0) i++;
         uint16_t len = (uint16_t)(i - start);
-        if (len >= sizeof(tmp)) len = sizeof(tmp) - 1;
-        memcpy(tmp, &p[start], len);
-        tmp[len] = 0;
-        if (field == 0) aacp_copy_cstr(aacp_dev_name, sizeof(aacp_dev_name), tmp);
-        else if (field == 1) aacp_copy_cstr(aacp_dev_model, sizeof(aacp_dev_model), tmp);
-        else if (field == 3) aacp_copy_cstr(aacp_dev_serial, sizeof(aacp_dev_serial), tmp);
-        else if (field == 4) aacp_copy_cstr(aacp_dev_fw, sizeof(aacp_dev_fw), tmp);
-        field++;
         if (i < n && p[i] == 0) i++;
+
+        char tmp[32];
+        tmp[0] = 0;
+        if (aacp_field_is_utf16le(&p[start], len)) {
+            uint16_t o = 0;
+            for (uint16_t k = 0; k + 1 < len && o < sizeof(tmp) - 1; k += 2) {
+                tmp[o++] = (char) p[start + k];
+            }
+            tmp[o] = 0;
+        } else if (aacp_field_is_text(&p[start], len)) {
+            uint16_t o = len < sizeof(tmp) - 1 ? len : (uint16_t)(sizeof(tmp) - 1);
+            memcpy(tmp, &p[start], o);
+            tmp[o] = 0;
+        } else {
+            continue;
+        }
+        memcpy(fields[got], tmp, sizeof(fields[0]));
+        got++;
     }
+    aacp_copy_cstr(aacp_dev_name, sizeof(aacp_dev_name), fields[0]);
+    aacp_copy_cstr(aacp_dev_model, sizeof(aacp_dev_model), fields[1]);
+    aacp_copy_cstr(aacp_dev_serial, sizeof(aacp_dev_serial), fields[3]);
+    aacp_copy_cstr(aacp_dev_fw, sizeof(aacp_dev_fw), fields[4]);
     printf("[AACP] device-info name='%s' model='%s' serial='%s' fw='%s'\n",
            aacp_dev_name, aacp_dev_model, aacp_dev_serial, aacp_dev_fw);
 }
@@ -588,7 +655,7 @@ static void aacp_parse_device_info(const uint8_t *p, uint16_t n) {
 static void aacp_handle_stem(uint8_t type, uint8_t bud) {
     aacp_last19_type = type;
     aacp_last19_bud = bud;
-    snprintf(aacp_last19_hex, sizeof(aacp_last19_hex), "%02X %02X", type, bud);
+    snprintf(aacp_last19_hex, sizeof(aacp_last19_hex), "%02X:%02X", type, bud);
     // StemAction.kt defaults: single=play/pause, double=next, triple=prev,
     // long=cycle noise. 0x16 ClickHold=noise means the headset already cycles
     // on hold — do not send a second 0x0D.
@@ -716,6 +783,31 @@ static void aacp_handle_control(const uint8_t *pkt, uint16_t size) {
 
     if (opcode == 0x001D) {
         aacp_parse_device_info(p, n);
+        return;
+    }
+
+    if (opcode == 0x0017) {
+        // AAP Definitions.md "Received Head Tracking Sensor Data":
+        // orient at packet offsets 43/45/47, accel at 51/53 (2 bytes each).
+        // Incoming stream already runs; do not hex-dump (CDC drops).
+        if (size >= 55) {
+            int16_t o1 = (int16_t) little_endian_read_16(pkt, 43);
+            int16_t o2 = (int16_t) little_endian_read_16(pkt, 45);
+            int16_t o3 = (int16_t) little_endian_read_16(pkt, 47);
+            int16_t ax = (int16_t) little_endian_read_16(pkt, 51);
+            int16_t ay = (int16_t) little_endian_read_16(pkt, 53);
+            uint32_t now = btstack_run_loop_get_time_ms();
+            if (now - aacp_imu_last_log_ms >= 250) {
+                aacp_imu_last_log_ms = now;
+                printf("[AACP] IMU o=%d,%d,%d a=%d,%d\n",
+                       (int) o1, (int) o2, (int) o3, (int) ax, (int) ay);
+            }
+        }
+        return;
+    }
+
+    if (opcode == 0x0030 || opcode == 0x0031) {
+        // BLE keys — Pico cannot join iCloud. Do not print key material.
         return;
     }
 

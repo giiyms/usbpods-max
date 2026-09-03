@@ -23,6 +23,8 @@ void hid_consumer_press(uint8_t bits) {
 }
 
 void hid_consumer_play_pause(void) { hid_consumer_press(HID_CC_PLAY_PAUSE); }
+void hid_consumer_play(void)       { hid_consumer_press(HID_CC_PLAY); }
+void hid_consumer_pause(void)      { hid_consumer_press(HID_CC_PAUSE); }
 void hid_consumer_next(void)       { hid_consumer_press(HID_CC_NEXT); }
 void hid_consumer_prev(void)       { hid_consumer_press(HID_CC_PREV); }
 void hid_consumer_vol_up(void)     { hid_consumer_press(HID_CC_VOL_UP); }

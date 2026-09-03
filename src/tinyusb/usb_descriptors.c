@@ -144,8 +144,8 @@ uint8_t const desc_hid_report[] =
   0xC0                           // End Collection
 };
 
-// HID Consumer Control: Volume Up/Down, Mute, Play/Pause, Next, Prev.
-// 1-byte report, no report ID. Bit order must match hid_consumer.h HID_CC_*.
+// HID Consumer Control: 1-byte report, no report ID.
+// Bit order must match hid_consumer.h HID_CC_* (Play/Pause toggle + discrete Play/Pause).
 uint8_t const desc_hid_consumer_report[] =
 {
   0x05, 0x0C,        // Usage Page (Consumer)
@@ -153,17 +153,17 @@ uint8_t const desc_hid_consumer_report[] =
   0xA1, 0x01,        // Collection (Application)
     0x15, 0x00,      //   Logical Minimum (0)
     0x25, 0x01,      //   Logical Maximum (1)
-    0x09, 0xE9,      //   Usage (Volume Increment)
-    0x09, 0xEA,      //   Usage (Volume Decrement)
-    0x09, 0xE2,      //   Usage (Mute)
-    0x09, 0xCD,      //   Usage (Play/Pause)
-    0x09, 0xB5,      //   Usage (Scan Next Track)
-    0x09, 0xB6,      //   Usage (Scan Previous Track)
+    0x09, 0xE9,      //   Usage (Volume Increment)     bit 0
+    0x09, 0xEA,      //   Usage (Volume Decrement)     bit 1
+    0x09, 0xE2,      //   Usage (Mute)                 bit 2
+    0x09, 0xCD,      //   Usage (Play/Pause)           bit 3  (0x0019 click only)
+    0x09, 0xB5,      //   Usage (Scan Next Track)      bit 4
+    0x09, 0xB6,      //   Usage (Scan Previous Track)  bit 5
+    0x09, 0xB0,      //   Usage (Play)                 bit 6  (ear put-on resume)
+    0x09, 0xB1,      //   Usage (Pause)                bit 7  (ear take-off)
     0x75, 0x01,      //   Report Size (1)
-    0x95, 0x06,      //   Report Count (6)
+    0x95, 0x08,      //   Report Count (8)
     0x81, 0x02,      //   Input (Data, Variable, Absolute)
-    0x95, 0x02,      //   Report Count (2) padding
-    0x81, 0x03,      //   Input (Constant, Variable, Absolute)
   0xC0               // End Collection
 };
 

@@ -713,7 +713,7 @@
         <p class="err" id="err"></p>
 
         <div class="device-title-wrap">
-          <h2 class="device-title">Daniel’s AirPods Max</h2>
+          <h2 class="device-title" id="deviceTitle">AirPods Max</h2>
         </div>
 
         <div class="device-sub-status">
@@ -805,7 +805,7 @@
           <div class="drawer-group">
             <span class="drawer-label">Spatial</span>
             <div class="drawer-row">
-              <span class="pairing-sub">Serial only — no invented AACP opcode</span>
+              <span class="pairing-sub" id="stImu">Incoming 0x0017 IMU (AAP offsets 43/45/47, 51/53)</span>
               <button class="btn-secondary" id="btnSpatial" type="button">Spatial off</button>
             </div>
           </div>
@@ -814,8 +814,8 @@
 
           <div class="drawer-group">
             <span class="drawer-label">Find My</span>
-            <p class="findmy-copy" id="stFindmy">network: Pico cannot join iCloud</p>
-            <p class="findmy-copy" id="stKeys">BLE keys: —</p>
+            <p class="findmy-copy" id="stFindmy">network: unsupported (Pico cannot join iCloud)</p>
+            <p class="findmy-copy" id="stKeys">BLE keys: not requested</p>
           </div>
 
           <div class="divider"></div>
@@ -931,14 +931,36 @@
       $("batFill").style.width = pct == null ? "0%" : pct + "%";
     }
 
+    function last19Label(type, bud) {
+      const names = { 5: "click", 6: "next", 7: "prev", 8: "hold" };
+      const t = Number(type);
+      if (!names[t]) return null;
+      const side = Number(bud) === 2 ? "R" : Number(bud) === 1 ? "L" : "";
+      return names[t] + (side ? " " + side : "");
+    }
+
+    function setCrown(s) {
+      const from19 = last19Label(s.last19_type, s.last19_bud);
+      if (from19) lastCrown = from19;
+      else if (typeof s.vol === "number" && !Number.isNaN(s.vol) && s.vol >= 0) {
+        lastCrown = Math.round(s.vol * 100 / 127) + "%";
+      } else if (s.last19 && s.last19 !== "-") {
+        lastCrown = s.last19;
+      }
+      $("stCrown").textContent = lastCrown;
+    }
+
     function applyStatus(s) {
       $("stEar").textContent = earLabel(s.ear_l, s.ear_r);
-      $("stCrown").textContent = lastCrown;
+      setCrown(s);
       $("stCa").textContent = caLabel(s.ca);
       $("stRadio").textContent = radioLabel(s);
       $("stSlot").textContent = s.slot || "—";
       $("stAddr").textContent = s.addr || "—";
       setBattery(s);
+      if (s.name && s.name !== "-") {
+        $("deviceTitle").textContent = s.name;
+      }
       if (typeof s.gain === "number" && !Number.isNaN(s.gain)) {
         $("gain").value = s.gain;
         $("gainLabel").textContent = s.gain + " dB";
@@ -960,6 +982,7 @@
         gain: u[2], slot: u[3],
         bat_l: u[4], bat_r: u[5], bat_c: u[6], bat_h: u[7],
         noise: u[8], ear_l: u[9], ear_r: u[10], ca: u[11],
+        last19_type: u[27], last19_bud: u[28],
         addr: addr === "00:00:00:00:00:00" ? "—" : addr
       });
     }
@@ -977,13 +1000,23 @@
         const i = part.indexOf("=");
         if (i > 0) kv[part.slice(0, i)] = part.slice(i + 1);
       }
+      const last19 = kv.last19 || "";
+      let last19_type, last19_bud;
+      const m19 = last19.match(/^([0-9A-Fa-f]{2}):([0-9A-Fa-f]{2})$/);
+      if (m19) {
+        last19_type = parseInt(m19[1], 16);
+        last19_bud = parseInt(m19[2], 16);
+      }
       applyStatus({
         a2dp: kv.a2dp === "1", aacp: kv.aacp === "1", mic: kv.mic === "1",
         gain: Number(kv.gain), slot: Number(kv.slot),
         bat_l: Number(kv.bat_l), bat_r: Number(kv.bat_r),
         bat_c: Number(kv.bat_c), bat_h: Number(kv.bat_h),
         noise: Number(kv.noise), ear_l: Number(kv.ear_l), ear_r: Number(kv.ear_r),
-        ca: Number(kv.ca), addr: kv.addr
+        ca: Number(kv.ca), addr: kv.addr,
+        last19: last19, last19_type, last19_bud,
+        vol: kv.vol !== undefined ? Number(kv.vol) : undefined,
+        name: kv.name
       });
     }
 
@@ -1085,7 +1118,10 @@
               const line = serialBuf.slice(0, n).replace(/\r$/, "");
               serialBuf = serialBuf.slice(n + 1);
               if (line.startsWith("@")) parseAtLine(line);
-              else if (/0x0019/i.test(line)) {
+              else if (/\[AACP\] IMU /.test(line)) {
+                const el = $("stImu");
+                if (el) el.textContent = line.replace("[AACP] ", "");
+              } else if (/0x0019/i.test(line)) {
                 noteCrown(line);
                 log(line);
               } else if (line && !line.startsWith("@STATUS")) {

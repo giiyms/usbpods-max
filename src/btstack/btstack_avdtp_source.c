@@ -55,7 +55,6 @@
 #include "classic/device_id_server.h"
 
 #include "../pico_w_led.h"
-#include "../hid_consumer.h"
 
 #define HAVE_AAC_FDK
 
@@ -1927,10 +1926,17 @@ static void show_usage(void){
 }
 
 
+static bool avrcp_local_vol_pending = false;
+static uint8_t avrcp_local_vol_value = 0;
+
 void set_bt_volume(int16_t val){
-    media_tracker.volume = (val*2 + 100) * 127 / 100;
+    int v = (val * 2 + 100) * 127 / 100;
+    if (v < 0) v = 0;
+    if (v > 127) v = 127;
+    media_tracker.volume = (uint8_t) v;
+    avrcp_local_vol_value = media_tracker.volume;
+    avrcp_local_vol_pending = true;
     avrcp_controller_set_absolute_volume(media_tracker.avrcp_cid, media_tracker.volume);
-    //printf("(via set usb volume) %d%% (%d)\n",  media_tracker.volume * 100 / 127,  media_tracker.volume);
 }
 
 static void stdin_process(char cmd){
@@ -2654,15 +2660,16 @@ static void avrcp_controller_packet_handler(uint8_t packet_type, uint16_t channe
     
     switch (packet[2]){
         case AVRCP_SUBEVENT_NOTIFICATION_VOLUME_CHANGED: {
-            uint8_t prev = media_tracker.volume;
-            media_tracker.volume = avrcp_subevent_notification_volume_changed_get_absolute_volume(packet);
-
-            _bt_sink_volume_changed = true;
-            printf("AVRCP Controller: Notification Absolute Volume %d %%\n", media_tracker.volume * 100 / 127);
-            // Crown rotation is AVRCP absolute volume, not a 0x0019 stem type.
-            // Mirror to USB speaker (UAC SET_CUR via audio_control_task) and HID.
-            if (media_tracker.volume > prev) hid_consumer_vol_up();
-            else if (media_tracker.volume < prev) hid_consumer_vol_down();
+            uint8_t abs_vol = avrcp_subevent_notification_volume_changed_get_absolute_volume(packet);
+            bool local_echo = avrcp_local_vol_pending && abs_vol == avrcp_local_vol_value;
+            avrcp_local_vol_pending = false;
+            media_tracker.volume = abs_vol;
+            // Crown rotation is AVRCP absolute volume. Drive Mac via UAC Feature
+            // Unit interrupts only — HID Vol Up/Down fights the absolute slider
+            // and the Mute checkbox. Do not print on every tick (CDC drops).
+            if (!local_echo) {
+                _bt_sink_volume_changed = true;
+            }
             break;
         }
         case AVRCP_SUBEVENT_NOTIFICATION_EVENT_BATT_STATUS_CHANGED:

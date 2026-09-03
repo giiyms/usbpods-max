@@ -127,8 +127,8 @@ void control_print_status_human(void) {
            (buf[15] & 0x01) ? "yes" : "no",
            (buf[15] & 0x02) ? "active" : "idle");
     printf("  mic gain %u dB%s\n", (unsigned) buf[2], buf[14] ? " (UAC mute)" : "");
-    printf("  battery L=%u R=%u case=%u headset=%u  (255=unknown)\n",
-           (unsigned) buf[4], (unsigned) buf[5], (unsigned) buf[6], (unsigned) buf[7]);
+    printf("  battery headset=%u  L=%u R=%u case=%u  (255=unknown; Max 2 uses headset)\n",
+           (unsigned) buf[7], (unsigned) buf[4], (unsigned) buf[5], (unsigned) buf[6]);
     printf("  noise-control %s  CA %s  ear L=%u R=%u\n",
            noise, ca, (unsigned) buf[9], (unsigned) buf[10]);
     printf("  name '%s' model '%s' serial '%s' fw '%s'\n",
@@ -140,7 +140,7 @@ void control_print_status_human(void) {
            "bat_l=%u bat_r=%u bat_c=%u bat_h=%u noise=%u ear_l=%u ear_r=%u ca=%u "
            "owns=%u duck=%u autocon=%u allowauto=%u earen=%u gestures=%u hold=%u "
            "crown=%u autoans=%u chime=%u adaptvol=%u sleep=%u listen=%u "
-           "last19=%s name=%s model=%s serial=%s fw=%s "
+           "last19=%s vol=%u name=%s model=%s serial=%s fw=%s findmy=unsupported "
            "addr=%02x:%02x:%02x:%02x:%02x:%02x\n",
            (buf[1] & 0x01) ? 1 : 0,
            (buf[1] & 0x02) ? 1 : 0,
@@ -154,6 +154,7 @@ void control_print_status_human(void) {
            aacp_get_crown_dir(), aacp_get_auto_ans(), aacp_get_chime(),
            aacp_get_adapt_vol(), aacp_get_sleep_det(), aacp_get_listen_mask(),
            aacp_get_last19_hex()[0] ? aacp_get_last19_hex() : "-",
+           (unsigned) get_bt_volume(),
            aacp_get_dev_name()[0] ? aacp_get_dev_name() : "-",
            aacp_get_dev_model()[0] ? aacp_get_dev_model() : "-",
            aacp_get_dev_serial()[0] ? aacp_get_dev_serial() : "-",
