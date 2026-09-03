@@ -14,3 +14,5 @@
 !.github/**
 !.nojekyll
 !web/.nojekyll
+# Pages publishes web/ only. Keep UF2s in /firmware, never in web/.
+web/firmware/
