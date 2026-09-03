@@ -68,6 +68,8 @@ add_executable(${PROJECT_NAME}
     src/tinyusb/uac.c
     src/tinyusb/usb_descriptors.c
     src/tinyusb/debug_cdc.c
+    src/mic_gain.c
+    src/control.c
 )
 
 

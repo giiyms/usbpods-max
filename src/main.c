@@ -29,6 +29,8 @@
 #include "tinyusb/uac.h"
 #include "tinyusb/debug_cdc.h"
 #include "pico_w_led.h"
+#include "mic_gain.h"
+#include "control.h"
 #include "pico/flash.h"
 
 
@@ -243,6 +245,8 @@ int main() {
     tinyusb_main();
 
     audio_slot_queue_init();
+    mic_gain_init();
+    control_init();
 
     printf("init ctw43.\n");
 
@@ -281,6 +285,7 @@ int main() {
         watchdog_update();  // feed the watchdog
         process_button_actions();
         tinyusb_control_task();
+        control_main_task();
 
         // Mic lifecycle: USB alt-setting callbacks (IRQ context) may not call
         // BTstack directly, so they only latch requests; execute them here

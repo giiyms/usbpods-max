@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 #include "pico/stdlib.h"
 #include "pico/cyw43_arch.h"
 #include "pico_w_led.h"
@@ -347,4 +348,26 @@ void read_slot2_mac(uint8_t mac[MAC_LEN]) {
  */
 bool write_slot2_mac(const uint8_t mac[MAC_LEN]) {
     return _write_mac_slot(SLOT2_OFFSET_IN_PAGE, mac);
+}
+
+// Gain lives on the same last page as the MACs / slot byte, past the 12-byte
+// MAC pair. All writers copy-then-program that page, so they preserve each other.
+#define SETTINGS_MAGIC            0x5A
+#define SETTINGS_MAGIC_OFF        16
+#define SETTINGS_GAIN_OFF         17
+
+uint8_t read_mic_gain_flash(void) {
+    const uint8_t *flash_ptr = (const uint8_t *)(XIP_BASE + mac_page_base);
+    if (flash_ptr[SETTINGS_MAGIC_OFF] != SETTINGS_MAGIC) return 0;
+    uint8_t db = flash_ptr[SETTINGS_GAIN_OFF];
+    if (db > 24) return 0;
+    return db;
+}
+
+bool write_mic_gain_flash(uint8_t gain_db) {
+    if (gain_db > 24) gain_db = 24;
+    memcpy(mac_page_buf, (const void *)(XIP_BASE + mac_page_base), FLASH_PAGE_SIZE);
+    mac_page_buf[SETTINGS_MAGIC_OFF] = SETTINGS_MAGIC;
+    mac_page_buf[SETTINGS_GAIN_OFF]  = gain_db;
+    return flash_safe_execute(mac_flash_cb, NULL, 100) == PICO_OK;
 }

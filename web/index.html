@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>USBPods Max</title>
+  <style>
+    :root {
+      --bg: #0e1116;
+      --panel: #171b22;
+      --line: #2a3140;
+      --text: #e8edf5;
+      --muted: #8b95a8;
+      --accent: #7eb6ff;
+      --good: #5bd39b;
+      --warn: #e6b84d;
+      --bad: #e06c75;
+      --btn: #243044;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 15px/1.45 "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    header {
+      padding: 1.4rem 1.2rem 0.6rem;
+      max-width: 720px;
+      margin: 0 auto;
+    }
+    h1 { font-size: 1.45rem; font-weight: 650; margin: 0 0 0.25rem; }
+    .sub { color: var(--muted); margin: 0; }
+    main { max-width: 720px; margin: 0 auto; padding: 0.8rem 1.2rem 3rem; }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 1rem 1.1rem;
+      margin: 0.8rem 0;
+    }
+    .row { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; }
+    button {
+      background: var(--btn);
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0.45rem 0.85rem;
+      cursor: pointer;
+      font: inherit;
+    }
+    button:hover { border-color: var(--accent); }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    button.primary { background: #1d4f91; border-color: #3d7ad6; }
+    button.on { background: #1e4a38; border-color: var(--good); }
+    .pill {
+      display: inline-block;
+      padding: 0.15rem 0.55rem;
+      border-radius: 999px;
+      background: #222833;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    .pill.up { color: var(--good); background: #173328; }
+    .pill.down { color: var(--bad); background: #3a1e22; }
+    label { color: var(--muted); display: block; margin-bottom: 0.35rem; }
+    input[type=range] { width: 100%; }
+    .gain-val { font-variant-numeric: tabular-nums; color: var(--accent); font-size: 1.2rem; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 1rem; }
+    @media (max-width: 540px) { .grid { grid-template-columns: 1fr; } }
+    .log {
+      font: 12px/1.4 ui-monospace, monospace;
+      white-space: pre-wrap;
+      max-height: 180px;
+      overflow: auto;
+      color: var(--muted);
+      margin: 0;
+    }
+    a { color: var(--accent); }
+    .warnbox {
+      border-color: #5a4a20;
+      background: #241e10;
+      color: #f0d9a0;
+      font-size: 0.92rem;
+    }
+    .err { color: var(--bad); min-height: 1.2em; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>USBPods Max</h1>
+    <p class="sub">AirPods control for the Pico 2 W dongle — Chrome or Edge, no driver.</p>
+  </header>
+  <main>
+    <div class="card warnbox">
+      If the Mac or PC’s own Bluetooth is connected to the AirPods, A2DP on this
+      dongle dies and speakers go silent. Disconnect the headset from the host
+      Bluetooth stack first. USB-C on AirPods Max 2 is playback-only — this
+      dongle is the 2-way path.
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <button class="primary" id="btnConnect">Connect device</button>
+        <button id="btnDisconnectApp" disabled>Release</button>
+        <span class="pill" id="connPill">not connected</span>
+      </div>
+      <p class="err" id="err"></p>
+      <p class="sub" style="margin:0.6rem 0 0">
+        Pick <strong>TinyUSB BT</strong> (WebHID). If that list is empty, the page
+        falls back to the serial port named <strong>USBPods Max Console</strong>.
+      </p>
+    </div>
+
+    <div class="card">
+      <label>Mic gain boost <span class="gain-val" id="gainLabel">0 dB</span></label>
+      <input type="range" id="gain" min="0" max="24" value="0" disabled>
+      <p class="sub" style="margin:0.4rem 0 0">
+        Digital gain on the Pico after AAC-ELD decode (0 to +24 dB, default 0).
+        Soft-clip limiter; not HFP. Same control as Windows’ recording slider
+        (UAC Feature Unit) and the serial <code>gain</code> command.
+      </p>
+    </div>
+
+    <div class="card">
+      <h2 style="margin:0 0 0.6rem;font-size:1.05rem">Status</h2>
+      <div class="grid">
+        <div>A2DP <span class="pill" id="stA2dp">—</span></div>
+        <div>AACP <span class="pill" id="stAacp">—</span></div>
+        <div>Mic stream <span class="pill" id="stMic">—</span></div>
+        <div>Slot <span class="pill" id="stSlot">—</span></div>
+        <div>Battery L/R <span id="stBat">—</span></div>
+        <div>Case / headset <span id="stBat2">—</span></div>
+        <div>Noise control <span id="stNoise">—</span></div>
+        <div>Conversation Awareness <span id="stCa">—</span></div>
+        <div>Ear L/R <span id="stEar">—</span></div>
+        <div>Address <span id="stAddr">—</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin:0 0 0.6rem;font-size:1.05rem">Noise control</h2>
+      <div class="row" id="noiseBtns">
+        <button data-noise="1" disabled>Off</button>
+        <button data-noise="2" disabled>ANC</button>
+        <button data-noise="3" disabled>Transparency</button>
+        <button data-noise="4" disabled>Adaptive</button>
+      </div>
+      <p class="sub" style="margin:0.5rem 0 0">AACP control <code>0x09 / 0x0D</code> from librepods. Max 2 has all four modes.</p>
+    </div>
+
+    <div class="card">
+      <h2 style="margin:0 0 0.6rem;font-size:1.05rem">Pairing</h2>
+      <div class="row">
+        <button id="btnPair" disabled>Pair</button>
+        <button id="btnDrop" disabled>Disconnect</button>
+        <button id="btnRecon" disabled>Reconnect</button>
+        <button id="btnSlot1" disabled>Slot 1</button>
+        <button id="btnSlot2" disabled>Slot 2</button>
+      </div>
+      <p class="sub" style="margin:0.5rem 0 0">
+        Pair = long-press BOOTSEL on the Pico, then put the case in pairing mode.
+        Host Bluetooth must not own the headset.
+      </p>
+    </div>
+
+    <div class="card">
+      <h2 style="margin:0 0 0.6rem;font-size:1.05rem">Log</h2>
+      <pre class="log" id="log"></pre>
+    </div>
+
+    <p class="sub">
+      Protocol: <a href="PROTOCOL.md">PROTOCOL.md</a>
+      · Features: <a href="AACP-FEATURES.md">AACP-FEATURES.md</a>
+      · This page is static (GitHub Pages). HTTPS or localhost required for WebHID / Web Serial.
+    </p>
+  </main>
+  <script>
+    const VID = 0xCafe;
+    const USAGE_PAGE = 0xFFA0;
+    const REPORT_LEN = 32;
+    const CMD = { STATUS: 1, GAIN: 2, PAIR: 3, DISCONNECT: 4, RECONNECT: 5, SLOT: 6, NOISE: 7, CA: 8 };
+
+    let hid = null;
+    let serial = null;
+    let serialReader = null;
+    let serialWriter = null;
+    let serialBuf = "";
+    let pollTimer = null;
+    let gainDebounce = null;
+
+    const $ = (id) => document.getElementById(id);
+    const log = (m) => {
+      const el = $("log");
+      el.textContent += m + "\n";
+      el.scrollTop = el.scrollHeight;
+    };
+    const setErr = (m) => { $("err").textContent = m || ""; };
+
+    function bat(v) { return v === 255 || v === undefined ? "—" : v + "%"; }
+    function noiseName(n) {
+      return { 1: "Off", 2: "ANC", 3: "Transparency", 4: "Adaptive" }[n] || "unknown";
+    }
+    function pill(el, up, label) {
+      el.textContent = label;
+      el.className = "pill " + (up ? "up" : "down");
+    }
+
+    function applyStatus(s) {
+      pill($("stA2dp"), s.a2dp, s.a2dp ? "up" : "down");
+      pill($("stAacp"), s.aacp, s.aacp ? "up" : "down");
+      pill($("stMic"), s.mic, s.mic ? "on" : "off");
+      $("stSlot").textContent = s.slot || "—";
+      $("stSlot").className = "pill";
+      $("stBat").textContent = bat(s.bat_l) + " / " + bat(s.bat_r);
+      $("stBat2").textContent = bat(s.bat_c) + " / " + bat(s.bat_h);
+      $("stNoise").textContent = noiseName(s.noise);
+      $("stCa").textContent = s.ca === 1 ? "on" : s.ca === 2 ? "off" : "—";
+      $("stEar").textContent = (s.ear_l === 255 ? "—" : s.ear_l) + " / " + (s.ear_r === 255 ? "—" : s.ear_r);
+      $("stAddr").textContent = s.addr || "—";
+      if (typeof s.gain === "number") {
+        $("gain").value = s.gain;
+        $("gainLabel").textContent = s.gain + " dB";
+      }
+      document.querySelectorAll("#noiseBtns button").forEach((b) => {
+        b.classList.toggle("on", Number(b.dataset.noise) === s.noise);
+      });
+    }
+
+    function parseHid(buf) {
+      const u = new Uint8Array(buf);
+      if (u[0] !== 1) return;
+      const flags = u[1];
+      const addr = [...u.slice(16, 22)].map((b) => b.toString(16).padStart(2, "0")).join(":");
+      applyStatus({
+        a2dp: !!(flags & 1), aacp: !!(flags & 2), mic: !!(flags & 4),
+        gain: u[2], slot: u[3],
+        bat_l: u[4], bat_r: u[5], bat_c: u[6], bat_h: u[7],
+        noise: u[8], ear_l: u[9], ear_r: u[10], ca: u[11],
+        addr: addr === "00:00:00:00:00:00" ? "—" : addr
+      });
+    }
+
+    function parseAtLine(line) {
+      if (!line.startsWith("@STATUS")) {
+        if (line.startsWith("@GAIN")) {
+          const g = Number(line.split(/\s+/)[1]);
+          if (!Number.isNaN(g)) { $("gain").value = g; $("gainLabel").textContent = g + " dB"; }
+        }
+        return;
+      }
+      const kv = {};
+      for (const part of line.trim().split(/\s+/).slice(1)) {
+        const i = part.indexOf("=");
+        if (i > 0) kv[part.slice(0, i)] = part.slice(i + 1);
+      }
+      applyStatus({
+        a2dp: kv.a2dp === "1", aacp: kv.aacp === "1", mic: kv.mic === "1",
+        gain: Number(kv.gain), slot: Number(kv.slot),
+        bat_l: Number(kv.bat_l), bat_r: Number(kv.bat_r),
+        bat_c: Number(kv.bat_c), bat_h: Number(kv.bat_h),
+        noise: Number(kv.noise), ear_l: Number(kv.ear_l), ear_r: Number(kv.ear_r),
+        ca: Number(kv.ca), addr: kv.addr
+      });
+    }
+
+    function setConnected(kind) {
+      $("connPill").textContent = kind;
+      $("connPill").className = "pill up";
+      $("btnConnect").disabled = true;
+      $("btnDisconnectApp").disabled = false;
+      ["gain", "btnPair", "btnDrop", "btnRecon", "btnSlot1", "btnSlot2"].forEach((id) => { $(id).disabled = false; });
+      document.querySelectorAll("#noiseBtns button").forEach((b) => { b.disabled = false; });
+    }
+
+    function setDisconnected() {
+      $("connPill").textContent = "not connected";
+      $("connPill").className = "pill down";
+      $("btnConnect").disabled = false;
+      $("btnDisconnectApp").disabled = true;
+      ["gain", "btnPair", "btnDrop", "btnRecon", "btnSlot1", "btnSlot2"].forEach((id) => { $(id).disabled = true; });
+      document.querySelectorAll("#noiseBtns button").forEach((b) => { b.disabled = true; b.classList.remove("on"); });
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    }
+
+    async function sendHid(cmd, arg) {
+      if (!hid) return;
+      const buf = new Uint8Array(REPORT_LEN);
+      buf[0] = cmd;
+      if (arg !== undefined) buf[1] = arg;
+      await hid.sendReport(0, buf);
+    }
+
+    async function sendSerial(line) {
+      if (!serialWriter) return;
+      await serialWriter.write(line + "\n");
+    }
+
+    async function sendCmd(cmd, arg, serialLine) {
+      if (hid) await sendHid(cmd, arg);
+      else if (serialWriter) await sendSerial(serialLine);
+    }
+
+    async function connectHid() {
+      if (!navigator.hid) throw new Error("WebHID not available");
+      const picks = await navigator.hid.requestDevice({
+        filters: [{ vendorId: VID, usagePage: USAGE_PAGE }]
+      });
+      const dev = picks[0];
+      if (!dev) throw new Error("No HID device selected");
+      await dev.open();
+      hid = dev;
+      hid.addEventListener("inputreport", (ev) => parseHid(ev.data.buffer));
+      hid.addEventListener("disconnect", () => { hid = null; setDisconnected(); log("HID disconnected"); });
+      await sendHid(CMD.STATUS);
+      pollTimer = setInterval(() => sendHid(CMD.STATUS), 1000);
+      setConnected("WebHID · TinyUSB BT");
+      log("Connected via WebHID");
+    }
+
+    async function connectSerial() {
+      if (!navigator.serial) throw new Error("Web Serial not available");
+      const port = await navigator.serial.requestPort({ filters: [{ usbVendorId: VID }] });
+      await port.open({ baudRate: 115200 });
+      serial = port;
+      serialWriter = port.writable.getWriter();
+      serialReader = port.readable.getReader();
+      setConnected("Web Serial · USBPods Max Console");
+      log("Connected via Web Serial");
+      await sendSerial("status");
+      pollTimer = setInterval(() => sendSerial("status"), 1000);
+      (async () => {
+        const dec = new TextDecoder();
+        try {
+          while (true) {
+            const { value, done } = await serialReader.read();
+            if (done) break;
+            serialBuf += dec.decode(value, { stream: true });
+            let n;
+            while ((n = serialBuf.indexOf("\n")) >= 0) {
+              const line = serialBuf.slice(0, n).replace(/\r$/, "");
+              serialBuf = serialBuf.slice(n + 1);
+              if (line.startsWith("@")) parseAtLine(line);
+            }
+          }
+        } catch (e) {
+          log("serial read ended: " + e.message);
+        }
+        serial = null; serialWriter = null; serialReader = null;
+        setDisconnected();
+      })();
+    }
+
+    $("btnConnect").onclick = async () => {
+      setErr("");
+      try {
+        if (navigator.hid) {
+          try { await connectHid(); return; }
+          catch (e) {
+            if (e.name === "NotFoundError") log("No HID pick; trying Web Serial");
+            else throw e;
+          }
+        }
+        await connectSerial();
+      } catch (e) {
+        setErr(e.message);
+        log("connect failed: " + e.message);
+      }
+    };
+
+    $("btnDisconnectApp").onclick = async () => {
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      try { if (hid) { await hid.close(); hid = null; } } catch (_) {}
+      try {
+        if (serialReader) { await serialReader.cancel(); serialReader = null; }
+        if (serialWriter) { serialWriter.releaseLock(); serialWriter = null; }
+        if (serial) { await serial.close(); serial = null; }
+      } catch (_) {}
+      setDisconnected();
+      log("Released");
+    };
+
+    $("gain").oninput = () => {
+      $("gainLabel").textContent = $("gain").value + " dB";
+      clearTimeout(gainDebounce);
+      gainDebounce = setTimeout(() => {
+        const g = Number($("gain").value);
+        sendCmd(CMD.GAIN, g, "gain " + g);
+      }, 80);
+    };
+
+    $("btnPair").onclick = () => sendCmd(CMD.PAIR, 0, "pair");
+    $("btnDrop").onclick = () => sendCmd(CMD.DISCONNECT, 0, "disconnect");
+    $("btnRecon").onclick = () => sendCmd(CMD.RECONNECT, 0, "reconnect");
+    $("btnSlot1").onclick = () => sendCmd(CMD.SLOT, 1, "slot 1");
+    $("btnSlot2").onclick = () => sendCmd(CMD.SLOT, 2, "slot 2");
+    document.querySelectorAll("#noiseBtns button").forEach((b) => {
+      b.onclick = () => {
+        const m = Number(b.dataset.noise);
+        const names = { 1: "off", 2: "anc", 3: "trans", 4: "adaptive" };
+        sendCmd(CMD.NOISE, m, "anc " + names[m]);
+      };
+    });
+
+    if (location.protocol !== "https:" && location.hostname !== "localhost" && location.hostname !== "127.0.0.1") {
+      setErr("Open this page over HTTPS (GitHub Pages) or http://localhost — browsers block WebHID/Web Serial on file://");
+    }
+  </script>
+</body>
+</html>

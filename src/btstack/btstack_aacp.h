@@ -41,4 +41,17 @@ void aacp_mic_stop(void);
 // True between aacp_mic_start() and aacp_mic_stop()/channel close.
 bool aacp_mic_active(void);
 
+// --- Status parsed from AACP notifications (librepods opcodes, no invented
+// packets). Values of 0xFF mean "not yet reported". Noise/CA 0 = unknown.
+
+void aacp_get_battery(uint8_t *left, uint8_t *right, uint8_t *case_bat, uint8_t *headset);
+void aacp_get_ear(uint8_t *left, uint8_t *right);
+uint8_t aacp_get_noise_mode(void);   // 1=Off 2=ANC 3=Transparency 4=Adaptive
+uint8_t aacp_get_ca(void);           // 1=enabled 2=disabled (control id 0x28)
+
+// Send documented control commands (opcode 0x0009). Returns false if the
+// channel is not open. mode: 1-4 as above. ca: 1=on, 2=off.
+bool aacp_set_noise_mode(uint8_t mode);
+bool aacp_set_ca(uint8_t enable);
+
 #endif // BTSTACK_AACP_H

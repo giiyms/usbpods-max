@@ -39,6 +39,7 @@
  // virtual mic at 64000 Hz too) while the speaker runs at 48 kHz, so the mic
  // terminals reference their own fixed clock entity.
  #define UAC2_ENTITY_MIC_INPUT_TERMINAL  0x11
+ #define UAC2_ENTITY_MIC_FEATURE_UNIT    0x12
  #define UAC2_ENTITY_MIC_OUTPUT_TERMINAL 0x13
  #define UAC2_ENTITY_MIC_CLOCK           0x14
 
@@ -51,6 +52,7 @@
    ITF_NUM_AUDIO_STREAMING_MIC,
    ITF_NUM_CDC,        // CDC-ACM control interface (debug console)
    ITF_NUM_CDC_DATA,   // CDC-ACM data interface
+   ITF_NUM_HID,        // vendor HID: WebHID settings (gain / pair / status)
    ITF_NUM_TOTAL
  };
 
@@ -67,6 +69,7 @@
      /* Mic path entities */\
      + TUD_AUDIO_DESC_CLK_SRC_LEN\
      + TUD_AUDIO_DESC_INPUT_TERM_LEN\
+     + TUD_AUDIO_DESC_FEATURE_UNIT_ONE_CHANNEL_LEN\
      + TUD_AUDIO_DESC_OUTPUT_TERM_LEN\
      + TUD_AUDIO_DESC_STD_AC_INT_EP_LEN\
      /* Speaker AS interface: Alternate 0 + Alternate 1 */\
@@ -94,6 +97,7 @@
          /*_totallen*/ TUD_AUDIO_DESC_CLK_SRC_LEN + TUD_AUDIO_DESC_INPUT_TERM_LEN + \
                       TUD_AUDIO_DESC_FEATURE_UNIT_TWO_CHANNEL_LEN + TUD_AUDIO_DESC_OUTPUT_TERM_LEN + \
                       TUD_AUDIO_DESC_CLK_SRC_LEN + TUD_AUDIO_DESC_INPUT_TERM_LEN + \
+                      TUD_AUDIO_DESC_FEATURE_UNIT_ONE_CHANNEL_LEN + \
                       TUD_AUDIO_DESC_OUTPUT_TERM_LEN, \
          /*_ctrl*/ AUDIO_CS_AS_INTERFACE_CTRL_LATENCY_POS),\
      /* Clock Source Descriptor(4.7.2.1) — speaker, 48 kHz domain */\
@@ -124,10 +128,16 @@
          /*_termtype*/ AUDIO_TERM_TYPE_IN_GENERIC_MIC, /*_assocTerm*/ 0x00, /*_clkid*/ UAC2_ENTITY_MIC_CLOCK, \
          /*_nchannelslogical*/ 0x01, /*_channelcfg*/ AUDIO_CHANNEL_CONFIG_NON_PREDEFINED, \
          /*_idxchannelnames*/ 0x00, /*_ctrl*/ 0, /*_stridx*/ 0x00),\
+     /* Feature Unit — mic boost (0..+24 dB). Same gain as the serial/WebHID slider. */\
+     TUD_AUDIO_DESC_FEATURE_UNIT_ONE_CHANNEL(/*_unitid*/ UAC2_ENTITY_MIC_FEATURE_UNIT, \
+         /*_srcid*/ UAC2_ENTITY_MIC_INPUT_TERMINAL, \
+         /*_ctrlch0master*/ (AUDIO_CTRL_RW << AUDIO_FEATURE_UNIT_CTRL_MUTE_POS | \
+                             AUDIO_CTRL_RW << AUDIO_FEATURE_UNIT_CTRL_VOLUME_POS), \
+         /*_ctrlch1*/ (AUDIO_CTRL_NONE), /*_stridx*/ 0x00),\
      /* Output Terminal Descriptor(4.7.2.5) — mic to USB host */\
      TUD_AUDIO_DESC_OUTPUT_TERM(/*_termid*/ UAC2_ENTITY_MIC_OUTPUT_TERMINAL, \
          /*_termtype*/ AUDIO_TERM_TYPE_USB_STREAMING, /*_assocTerm*/ 0x00, \
-         /*_srcid*/ UAC2_ENTITY_MIC_INPUT_TERMINAL, /*_clkid*/ UAC2_ENTITY_MIC_CLOCK, \
+         /*_srcid*/ UAC2_ENTITY_MIC_FEATURE_UNIT, /*_clkid*/ UAC2_ENTITY_MIC_CLOCK, \
          /*_ctrl*/ 0x0000, /*_stridx*/ 0x00),\
      /* Standard AC Interrupt Endpoint Descriptor(4.8.2.1) */\
      TUD_AUDIO_DESC_STD_AC_INT_EP(/*_ep*/ _epint, /*_interval*/ 0x01), \

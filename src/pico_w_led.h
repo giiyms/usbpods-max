@@ -29,3 +29,7 @@ bool write_slot1_mac(const uint8_t mac[MAC_LEN]);
 void read_slot2_mac(uint8_t mac[MAC_LEN]);
 
 bool write_slot2_mac(const uint8_t mac[MAC_LEN]);
+
+// Mic gain dB (0-24) in the same flash page as the slot MACs. 0xFF / no magic → 0.
+uint8_t read_mic_gain_flash(void);
+bool write_mic_gain_flash(uint8_t gain_db);
