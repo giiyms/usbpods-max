@@ -31,7 +31,10 @@ bool mic_gain_get_mute(void);
 void mic_gain_apply(int16_t *samples, uint32_t n);
 
 // If a set_db requested persist, write flash once the change has settled.
+// allow_flash=false keeps the pending flag (do not erase+program mid-AACP).
 // Call from the main loop only (flash_safe_execute).
-void mic_gain_persist_task(void);
+void mic_gain_persist_task(bool allow_flash);
+bool mic_gain_persist_pending(void);
+void mic_gain_persist_ack(void);
 
 #endif // MIC_GAIN_H

@@ -83,9 +83,18 @@ void mic_gain_apply(int16_t *samples, uint32_t n) {
     }
 }
 
-void mic_gain_persist_task(void) {
+bool mic_gain_persist_pending(void) {
+    return persist_pending;
+}
+
+void mic_gain_persist_ack(void) {
+    persist_pending = false;
+}
+
+void mic_gain_persist_task(bool allow_flash) {
     if (!persist_pending) return;
     if (to_ms_since_boot(get_absolute_time()) < persist_at_ms) return;
+    if (!allow_flash) return;   // keep pending until AACP/mic is idle
     persist_pending = false;
     uint8_t db = gain_db;
     if (write_mic_gain_flash(db)) {

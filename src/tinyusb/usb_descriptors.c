@@ -75,10 +75,14 @@ uint8_t const * tud_descriptor_device_cb(void)
 //--------------------------------------------------------------------+
 // Configuration Descriptor
 //--------------------------------------------------------------------+
+// Two HID interfaces: vendor IN/OUT (WebHID) + consumer IN (media keys).
+// Do not multiply TUD_HID_INOUT_DESC_LEN by CFG_TUD_HID — the consumer
+// interface is IN-only (TUD_HID_DESC_LEN).
 #define CONFIG_TOTAL_LEN    	(TUD_CONFIG_DESC_LEN \
     + CFG_TUD_AUDIO * TUD_AUDIO_HEADSET_STEREO_DESC_LEN \
     + CFG_TUD_CDC * TUD_CDC_DESC_LEN \
-    + CFG_TUD_HID * TUD_HID_INOUT_DESC_LEN)
+    + TUD_HID_INOUT_DESC_LEN \
+    + TUD_HID_DESC_LEN)
 
 #if CFG_TUSB_MCU == OPT_MCU_LPC175X_6X || CFG_TUSB_MCU == OPT_MCU_LPC177X_8X || CFG_TUSB_MCU == OPT_MCU_LPC40XX
   // LPC 17xx and 40xx endpoint type (bulk/interrupt/iso) are fixed by its number
@@ -120,6 +124,7 @@ uint8_t const * tud_descriptor_device_cb(void)
 #define EPNUM_CDC_IN      0x84
 #define EPNUM_HID_OUT     0x05
 #define EPNUM_HID_IN      0x85
+#define EPNUM_HID_CC_IN   0x86
 
 // Vendor HID report: 32-byte input (status) + 32-byte output (commands), no
 // report IDs. Usage page 0xFFA0 — see src/control.h and web/PROTOCOL.md.
@@ -139,9 +144,32 @@ uint8_t const desc_hid_report[] =
   0xC0                           // End Collection
 };
 
+// HID Consumer Control: Volume Up/Down, Mute, Play/Pause, Next, Prev.
+// 1-byte report, no report ID. Bit order must match hid_consumer.h HID_CC_*.
+uint8_t const desc_hid_consumer_report[] =
+{
+  0x05, 0x0C,        // Usage Page (Consumer)
+  0x09, 0x01,        // Usage (Consumer Control)
+  0xA1, 0x01,        // Collection (Application)
+    0x15, 0x00,      //   Logical Minimum (0)
+    0x25, 0x01,      //   Logical Maximum (1)
+    0x09, 0xE9,      //   Usage (Volume Increment)
+    0x09, 0xEA,      //   Usage (Volume Decrement)
+    0x09, 0xE2,      //   Usage (Mute)
+    0x09, 0xCD,      //   Usage (Play/Pause)
+    0x09, 0xB5,      //   Usage (Scan Next Track)
+    0x09, 0xB6,      //   Usage (Scan Previous Track)
+    0x75, 0x01,      //   Report Size (1)
+    0x95, 0x06,      //   Report Count (6)
+    0x81, 0x02,      //   Input (Data, Variable, Absolute)
+    0x95, 0x02,      //   Report Count (2) padding
+    0x81, 0x03,      //   Input (Constant, Variable, Absolute)
+  0xC0               // End Collection
+};
+
 uint8_t const * tud_hid_descriptor_report_cb(uint8_t instance)
 {
-  (void) instance;
+  if (instance == 1) return desc_hid_consumer_report;
   return desc_hid_report;
 }
 
@@ -157,7 +185,10 @@ uint8_t const desc_configuration[] =
     TUD_CDC_DESCRIPTOR(ITF_NUM_CDC, 6, EPNUM_CDC_NOTIF, 8, EPNUM_CDC_OUT, EPNUM_CDC_IN, 64),
 
     // Vendor HID (WebHID): IN+OUT interrupt EPs so Chrome sendReport uses the OUT pipe
-    TUD_HID_INOUT_DESCRIPTOR(ITF_NUM_HID, 7, HID_ITF_PROTOCOL_NONE, sizeof(desc_hid_report), EPNUM_HID_OUT, EPNUM_HID_IN, CFG_TUD_HID_EP_BUFSIZE, 10)
+    TUD_HID_INOUT_DESCRIPTOR(ITF_NUM_HID, 7, HID_ITF_PROTOCOL_NONE, sizeof(desc_hid_report), EPNUM_HID_OUT, EPNUM_HID_IN, CFG_TUD_HID_EP_BUFSIZE, 10),
+
+    // HID Consumer Control (Play/Pause, volume, mute). IN-only. Report 1 byte.
+    TUD_HID_DESCRIPTOR(ITF_NUM_HID_CONSUMER, 8, HID_ITF_PROTOCOL_NONE, sizeof(desc_hid_consumer_report), EPNUM_HID_CC_IN, 8, 10)
 
   };
 
@@ -199,6 +230,7 @@ char const *string_desc_arr[] =
   "TinyUSB BT",                   // 5: Audio Interface
   "USBPods Max Console",          // 6: CDC serial menu + debug log
   "USBPods Max Control",          // 7: vendor HID
+  "USBPods Max Media",            // 8: HID Consumer Control
 };
 
 

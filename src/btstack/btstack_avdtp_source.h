@@ -46,6 +46,9 @@ void avdtp_disconnect_and_scan(void);
 // Drop A2DP/AVRCP without wiping the slot MAC or link key (web/serial Disconnect).
 void avdtp_disconnect_keep_pairing(void);
 
+// Drop A2DP without wiping the slot. Hold auto-reclaim (explicit disconnect / pair).
+void avdtp_reclaim_hold_set(bool hold);
+
 void gap_start_scanning(void);
 
 bool get_a2dp_connected_flag();

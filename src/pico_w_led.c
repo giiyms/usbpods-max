@@ -353,8 +353,16 @@ bool write_slot2_mac(const uint8_t mac[MAC_LEN]) {
 // Gain lives on the same last page as the MACs / slot byte, past the 12-byte
 // MAC pair. All writers copy-then-program that page, so they preserve each other.
 #define SETTINGS_MAGIC            0x5A
+#define SETTINGS_EXTRA_MAGIC      0xA5
 #define SETTINGS_MAGIC_OFF        16
 #define SETTINGS_GAIN_OFF         17
+#define SETTINGS_EXTRA_OFF        18
+#define SETTINGS_AUTOANS_OFF      19
+#define SETTINGS_CHIME_OFF        20
+#define SETTINGS_ADAPT_OFF        21
+#define SETTINGS_SLEEP_OFF        22
+#define SETTINGS_CROWN_OFF        23
+#define SETTINGS_LISTEN_OFF       24
 
 uint8_t read_mic_gain_flash(void) {
     const uint8_t *flash_ptr = (const uint8_t *)(XIP_BASE + mac_page_base);
@@ -365,9 +373,47 @@ uint8_t read_mic_gain_flash(void) {
 }
 
 bool write_mic_gain_flash(uint8_t gain_db) {
+    host_prefs_t prefs;
+    read_host_prefs_flash(&prefs);
+    return write_host_settings_flash(gain_db, &prefs);
+}
+
+void read_host_prefs_flash(host_prefs_t *out) {
+    // Defaults match handshake replay (LibrePods + user spec).
+    out->auto_ans    = 2;
+    out->chime       = 50;
+    out->adapt_vol   = 2;
+    out->sleep_det   = 1;
+    out->crown_dir   = 2;
+    out->listen_mask = 0x0F;
+    const uint8_t *flash_ptr = (const uint8_t *)(XIP_BASE + mac_page_base);
+    if (flash_ptr[SETTINGS_MAGIC_OFF] != SETTINGS_MAGIC) return;
+    if (flash_ptr[SETTINGS_EXTRA_OFF] != SETTINGS_EXTRA_MAGIC) return;
+    uint8_t a = flash_ptr[SETTINGS_AUTOANS_OFF];
+    uint8_t c = flash_ptr[SETTINGS_CHIME_OFF];
+    uint8_t v = flash_ptr[SETTINGS_ADAPT_OFF];
+    uint8_t s = flash_ptr[SETTINGS_SLEEP_OFF];
+    uint8_t d = flash_ptr[SETTINGS_CROWN_OFF];
+    uint8_t m = flash_ptr[SETTINGS_LISTEN_OFF];
+    if (a == 1 || a == 2) out->auto_ans = a;
+    if (c <= 100) out->chime = c;
+    if (v == 1 || v == 2) out->adapt_vol = v;
+    if (s == 1 || s == 2) out->sleep_det = s;
+    if (d == 1 || d == 2) out->crown_dir = d;
+    if (m != 0) out->listen_mask = m;
+}
+
+bool write_host_settings_flash(uint8_t gain_db, const host_prefs_t *prefs) {
     if (gain_db > 24) gain_db = 24;
     memcpy(mac_page_buf, (const void *)(XIP_BASE + mac_page_base), FLASH_PAGE_SIZE);
-    mac_page_buf[SETTINGS_MAGIC_OFF] = SETTINGS_MAGIC;
-    mac_page_buf[SETTINGS_GAIN_OFF]  = gain_db;
+    mac_page_buf[SETTINGS_MAGIC_OFF]   = SETTINGS_MAGIC;
+    mac_page_buf[SETTINGS_GAIN_OFF]    = gain_db;
+    mac_page_buf[SETTINGS_EXTRA_OFF]   = SETTINGS_EXTRA_MAGIC;
+    mac_page_buf[SETTINGS_AUTOANS_OFF] = prefs->auto_ans;
+    mac_page_buf[SETTINGS_CHIME_OFF]   = prefs->chime;
+    mac_page_buf[SETTINGS_ADAPT_OFF]   = prefs->adapt_vol;
+    mac_page_buf[SETTINGS_SLEEP_OFF]   = prefs->sleep_det;
+    mac_page_buf[SETTINGS_CROWN_OFF]   = prefs->crown_dir;
+    mac_page_buf[SETTINGS_LISTEN_OFF]  = prefs->listen_mask;
     return flash_safe_execute(mac_flash_cb, NULL, 100) == PICO_OK;
 }

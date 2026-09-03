@@ -142,12 +142,16 @@
         <div>A2DP <span class="pill" id="stA2dp">—</span></div>
         <div>AACP <span class="pill" id="stAacp">—</span></div>
         <div>Mic stream <span class="pill" id="stMic">—</span></div>
+        <div>Owns connection <span class="pill" id="stOwns">—</span></div>
+        <div>CA duck <span class="pill" id="stDuck">—</span></div>
         <div>Slot <span class="pill" id="stSlot">—</span></div>
         <div>Battery L/R <span id="stBat">—</span></div>
         <div>Case / headset <span id="stBat2">—</span></div>
         <div>Noise control <span id="stNoise">—</span></div>
         <div>Conversation Awareness <span id="stCa">—</span></div>
         <div>Ear L/R <span id="stEar">—</span></div>
+        <div>Last 0x0019 <span id="st19">—</span></div>
+        <div>Name / model <span id="stName">—</span></div>
         <div>Address <span id="stAddr">—</span></div>
       </div>
     </div>
@@ -159,8 +163,63 @@
         <button data-noise="2" disabled>ANC</button>
         <button data-noise="3" disabled>Transparency</button>
         <button data-noise="4" disabled>Adaptive</button>
+        <button data-ca="1" disabled>CA on</button>
+        <button data-ca="2" disabled>CA off</button>
       </div>
       <p class="sub" style="margin:0.5rem 0 0">AACP control <code>0x09 / 0x0D</code> from librepods. Max 2 has all four modes.</p>
+    </div>
+
+    <div class="card">
+      <h2 style="margin:0 0 0.6rem;font-size:1.05rem">Max 2 host grab</h2>
+      <p class="sub" style="margin:0 0 0.6rem">
+        Handshake replays LibrePods control set: own=1, Connect Automatically
+        <code>0x20=0x01</code> (keeps this host). Allow Auto Connect
+        <code>0x36</code> is not sent (Android: <code>0x20</code> is the one used).
+        iPhone may still need “Connect only When Last Connected”.
+      </p>
+      <div class="row">
+        <span class="pill" id="stAutocon">auto-conn —</span>
+        <span class="pill" id="stAllowauto">0x36 not sent</span>
+        <span class="pill" id="stEaren">ear-detect —</span>
+        <span class="pill" id="stGest">gestures —</span>
+      </div>
+      <div class="row" style="margin-top:0.6rem">
+        <button data-onoff="autocon" data-v="1" disabled>Auto-connect on</button>
+        <button data-onoff="autocon" data-v="2" disabled>Auto-connect off</button>
+        <button data-onoff="ear" data-v="1" disabled>Ear detect on</button>
+        <button data-onoff="ear" data-v="2" disabled>Ear detect off</button>
+      </div>
+      <label style="margin-top:0.8rem">Rename (opcode 0x001A)</label>
+      <div class="row">
+        <input id="rename" maxlength="32" placeholder="AirPods Max" disabled
+               style="flex:1;min-width:12rem;background:#11151c;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:0.45rem 0.7rem;font:inherit">
+        <button id="btnRename" disabled>Rename</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin:0 0 0.6rem;font-size:1.05rem">Crown, clicks, listening</h2>
+      <div class="row">
+        <button id="btnCrownDef" disabled>Crown default</button>
+        <button id="btnCrownRev" disabled>Crown reverse</button>
+        <button data-hold="1" disabled>Hold = noise</button>
+        <button data-hold="5" disabled>Hold = Siri</button>
+      </div>
+      <div class="row" style="margin-top:0.5rem">
+        <button data-onoff="autoans" data-v="1" disabled>Auto-answer on</button>
+        <button data-onoff="autoans" data-v="2" disabled>Auto-answer off</button>
+        <button data-onoff="adaptvol" data-v="1" disabled>Adapt vol on</button>
+        <button data-onoff="adaptvol" data-v="2" disabled>Adapt vol off</button>
+        <button data-onoff="sleep" data-v="1" disabled>Sleep on</button>
+        <button data-onoff="sleep" data-v="2" disabled>Sleep off</button>
+      </div>
+      <label style="margin-top:0.8rem">Chime volume <span class="gain-val" id="chimeLabel">50</span></label>
+      <input type="range" id="chime" min="0" max="100" value="50" disabled>
+      <p class="sub" style="margin:0.5rem 0 0">
+        Raw gestures 0x0F, listen mask 0x0F (Off|ANC|Trans|Adaptive), click/hold
+        mapped on the host from 0x0019 (LibrePods StemAction defaults).
+        0x14/0x15 are not sent — no packet values in LibrePods.
+      </p>
     </div>
 
     <div class="card">
@@ -206,7 +265,11 @@
     const VID = 0xCafe;
     const USAGE_PAGE = 0xFFA0;
     const REPORT_LEN = 32;
-    const CMD = { STATUS: 1, GAIN: 2, PAIR: 3, DISCONNECT: 4, RECONNECT: 5, SLOT: 6, NOISE: 7, CA: 8 };
+    const CMD = {
+      STATUS: 1, GAIN: 2, PAIR: 3, DISCONNECT: 4, RECONNECT: 5, SLOT: 6, NOISE: 7, CA: 8,
+      CROWN: 9, AUTOANS: 0x0A, CHIME: 0x0B, ADAPT: 0x0C, SLEEP: 0x0D, LISTEN: 0x0E,
+      RENAME: 0x0F, EAR: 0x10, GESTURES: 0x11, HOLD: 0x12, AUTOCONN: 0x13
+    };
 
     let hid = null;
     let serial = null;
@@ -237,6 +300,8 @@
       pill($("stA2dp"), s.a2dp, s.a2dp ? "up" : "down");
       pill($("stAacp"), s.aacp, s.aacp ? "up" : "down");
       pill($("stMic"), s.mic, s.mic ? "on" : "off");
+      pill($("stOwns"), s.owns === 1 || s.owns === true, s.owns === 1 || s.owns === true ? "own" : "not");
+      pill($("stDuck"), !!s.duck, s.duck ? "ducking" : "idle");
       $("stSlot").textContent = s.slot || "—";
       $("stSlot").className = "pill";
       $("stBat").textContent = bat(s.bat_l) + " / " + bat(s.bat_r);
@@ -244,12 +309,21 @@
       $("stNoise").textContent = noiseName(s.noise);
       $("stCa").textContent = s.ca === 1 ? "on" : s.ca === 2 ? "off" : "—";
       $("stEar").textContent = (s.ear_l === 255 ? "—" : s.ear_l) + " / " + (s.ear_r === 255 ? "—" : s.ear_r);
+      $("st19").textContent = s.last19 || "—";
+      $("stName").textContent = (s.name && s.name !== "-") ? (s.name + (s.model && s.model !== "-" ? " / " + s.model : "")) : "—";
       $("stAddr").textContent = s.addr || "—";
-      if (typeof s.gain === "number") {
+      $("stAutocon").textContent = "auto-conn " + (s.autocon === 1 ? "on" : s.autocon === 2 ? "off" : "—");
+      $("stEaren").textContent = "ear-detect " + (s.earen === 1 ? "on" : s.earen === 2 ? "off" : "—");
+      $("stGest").textContent = "gestures 0x" + (typeof s.gestures === "number" ? s.gestures.toString(16) : "—");
+      if (typeof s.gain === "number" && !Number.isNaN(s.gain)) {
         $("gain").value = s.gain;
         $("gainLabel").textContent = s.gain + " dB";
       }
-      document.querySelectorAll("#noiseBtns button").forEach((b) => {
+      if (typeof s.chime === "number" && !Number.isNaN(s.chime)) {
+        $("chime").value = s.chime;
+        $("chimeLabel").textContent = s.chime;
+      }
+      document.querySelectorAll("#noiseBtns [data-noise]").forEach((b) => {
         b.classList.toggle("on", Number(b.dataset.noise) === s.noise);
       });
     }
@@ -258,12 +332,19 @@
       const u = new Uint8Array(buf);
       if (u[0] !== 1) return;
       const flags = u[1];
+      const flags2 = u[15];
       const addr = [...u.slice(16, 22)].map((b) => b.toString(16).padStart(2, "0")).join(":");
+      const t19 = u[27], b19 = u[28];
       applyStatus({
         a2dp: !!(flags & 1), aacp: !!(flags & 2), mic: !!(flags & 4),
         gain: u[2], slot: u[3],
         bat_l: u[4], bat_r: u[5], bat_c: u[6], bat_h: u[7],
         noise: u[8], ear_l: u[9], ear_r: u[10], ca: u[11],
+        owns: flags2 & 1 ? 1 : 2, duck: !!(flags2 & 2),
+        autocon: flags2 & 4 ? 1 : 2, earen: flags2 & 8 ? 1 : 2,
+        chime: u[22], crown: u[23], listen: u[24], gestures: u[25], hold: u[26],
+        last19: (t19 || b19) ? (t19.toString(16).padStart(2, "0") + " " + b19.toString(16).padStart(2, "0")) : "",
+        autoans: u[29], adaptvol: u[30], sleep: u[31],
         addr: addr === "00:00:00:00:00:00" ? "—" : addr
       });
     }
@@ -287,7 +368,13 @@
         bat_l: Number(kv.bat_l), bat_r: Number(kv.bat_r),
         bat_c: Number(kv.bat_c), bat_h: Number(kv.bat_h),
         noise: Number(kv.noise), ear_l: Number(kv.ear_l), ear_r: Number(kv.ear_r),
-        ca: Number(kv.ca), addr: kv.addr
+        ca: Number(kv.ca), addr: kv.addr,
+        owns: Number(kv.owns), duck: kv.duck === "1",
+        autocon: Number(kv.autocon), allowauto: Number(kv.allowauto),
+        earen: Number(kv.earen), gestures: Number(kv.gestures), hold: Number(kv.hold),
+        crown: Number(kv.crown), autoans: Number(kv.autoans), chime: Number(kv.chime),
+        adaptvol: Number(kv.adaptvol), sleep: Number(kv.sleep), listen: Number(kv.listen),
+        last19: kv.last19, name: kv.name, model: kv.model, serial: kv.serial, fw: kv.fw
       });
     }
 
@@ -296,8 +383,9 @@
       $("connPill").className = "pill up";
       $("btnConnect").disabled = true;
       $("btnDisconnectApp").disabled = false;
-      ["gain", "btnPair", "btnDrop", "btnRecon", "btnSlot1", "btnSlot2"].forEach((id) => { $(id).disabled = false; });
-      document.querySelectorAll("#noiseBtns button").forEach((b) => { b.disabled = false; });
+      ["gain", "chime", "rename", "btnRename", "btnPair", "btnDrop", "btnRecon", "btnSlot1", "btnSlot2",
+       "btnCrownDef", "btnCrownRev"].forEach((id) => { const el = $(id); if (el) el.disabled = false; });
+      document.querySelectorAll("#noiseBtns button, [data-onoff], [data-hold], [data-ca]").forEach((b) => { b.disabled = false; });
     }
 
     function setDisconnected() {
@@ -305,8 +393,9 @@
       $("connPill").className = "pill down";
       $("btnConnect").disabled = false;
       $("btnDisconnectApp").disabled = true;
-      ["gain", "btnPair", "btnDrop", "btnRecon", "btnSlot1", "btnSlot2"].forEach((id) => { $(id).disabled = true; });
-      document.querySelectorAll("#noiseBtns button").forEach((b) => { b.disabled = true; b.classList.remove("on"); });
+      ["gain", "chime", "rename", "btnRename", "btnPair", "btnDrop", "btnRecon", "btnSlot1", "btnSlot2",
+       "btnCrownDef", "btnCrownRev"].forEach((id) => { const el = $(id); if (el) el.disabled = true; });
+      document.querySelectorAll("#noiseBtns button, [data-onoff], [data-hold], [data-ca]").forEach((b) => { b.disabled = true; b.classList.remove("on"); });
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
     }
 
@@ -314,7 +403,8 @@
       if (!hid) return;
       const buf = new Uint8Array(REPORT_LEN);
       buf[0] = cmd;
-      if (arg !== undefined) buf[1] = arg;
+      if (arg instanceof Uint8Array) buf.set(arg, 1);
+      else if (arg !== undefined) buf[1] = arg;
       await hid.sendReport(0, buf);
     }
 
@@ -421,13 +511,66 @@
     $("btnRecon").onclick = () => sendCmd(CMD.RECONNECT, 0, "reconnect");
     $("btnSlot1").onclick = () => sendCmd(CMD.SLOT, 1, "slot 1");
     $("btnSlot2").onclick = () => sendCmd(CMD.SLOT, 2, "slot 2");
-    document.querySelectorAll("#noiseBtns button").forEach((b) => {
+    document.querySelectorAll("#noiseBtns [data-noise]").forEach((b) => {
       b.onclick = () => {
         const m = Number(b.dataset.noise);
         const names = { 1: "off", 2: "anc", 3: "trans", 4: "adaptive" };
         sendCmd(CMD.NOISE, m, "anc " + names[m]);
       };
     });
+
+
+    document.querySelectorAll("[data-onoff]").forEach((b) => {
+      b.onclick = () => {
+        const kind = b.dataset.onoff;
+        const v = Number(b.dataset.v);
+        const map = {
+          autocon: [CMD.AUTOCONN, "autocon "],
+          ear: [CMD.EAR, "ear "],
+          autoans: [CMD.AUTOANS, "autoans "],
+          adaptvol: [CMD.ADAPT, "adaptvol "],
+          sleep: [CMD.SLEEP, "sleep "]
+        };
+        const m = map[kind];
+        if (!m) return;
+        sendCmd(m[0], v, m[1] + (v === 1 ? "on" : "off"));
+      };
+    });
+    document.querySelectorAll("[data-ca]").forEach((b) => {
+      b.onclick = () => {
+        const v = Number(b.dataset.ca);
+        sendCmd(CMD.CA, v, "ca " + (v === 1 ? "on" : "off"));
+      };
+    });
+    document.querySelectorAll("[data-hold]").forEach((b) => {
+      b.onclick = () => {
+        const v = Number(b.dataset.hold);
+        sendCmd(CMD.HOLD, v, "hold " + (v === 1 ? "noise" : "siri"));
+      };
+    });
+    $("btnCrownDef").onclick = () => sendCmd(CMD.CROWN, 2, "crown default");
+    $("btnCrownRev").onclick = () => sendCmd(CMD.CROWN, 1, "crown reverse");
+    $("btnRename").onclick = () => {
+      const name = $("rename").value.trim();
+      if (!name) return;
+      if (hid) {
+        const enc = new TextEncoder().encode(name.slice(0, 32));
+        const arg = new Uint8Array(1 + enc.length);
+        arg[0] = enc.length;
+        arg.set(enc, 1);
+        sendHid(CMD.RENAME, arg);
+      } else sendSerial("rename " + name);
+    };
+    let chimeDebounce = null;
+    $("chime").oninput = () => {
+      $("chimeLabel").textContent = $("chime").value;
+      clearTimeout(chimeDebounce);
+      chimeDebounce = setTimeout(() => {
+        const v = Number($("chime").value);
+        sendCmd(CMD.CHIME, v, "chime " + v);
+      }, 80);
+    };
+
 
 
     const clipsEl = $("clips");
@@ -552,6 +695,7 @@
         $("btnRec").disabled = false;
       }
     };
+
 
 
     if (location.protocol !== "https:" && location.hostname !== "localhost" && location.hostname !== "127.0.0.1") {
