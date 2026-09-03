@@ -123,6 +123,20 @@
     </div>
 
     <div class="card">
+      <h2 style="margin:0 0 0.6rem;font-size:1.05rem">A/B mic clip</h2>
+      <p class="sub" style="margin:0 0 0.7rem">
+        Records 3 seconds from <code>TinyUSB BT</code> (browser mic, Chrome/Edge),
+        then plays it back. Turn the gain, record again, keep the last two.
+        Disable browser noise suppression so you hear the Pico’s decode + gain.
+      </p>
+      <div class="row">
+        <button class="primary" id="btnRec" type="button">Record 3s</button>
+        <span class="pill" id="recPill">idle</span>
+      </div>
+      <div id="clips" style="margin-top:0.8rem"></div>
+    </div>
+
+    <div class="card">
       <h2 style="margin:0 0 0.6rem;font-size:1.05rem">Status</h2>
       <div class="grid">
         <div>A2DP <span class="pill" id="stA2dp">—</span></div>
@@ -505,6 +519,7 @@
       };
     });
 
+
     document.querySelectorAll("[data-onoff]").forEach((b) => {
       b.onclick = () => {
         const kind = b.dataset.onoff;
@@ -555,6 +570,133 @@
         sendCmd(CMD.CHIME, v, "chime " + v);
       }, 80);
     };
+
+
+
+    const clipsEl = $("clips");
+    const recPill = $("recPill");
+    let recording = false;
+
+    function recState(label, up) {
+      recPill.textContent = label;
+      recPill.className = "pill " + (up ? "up" : "down");
+    }
+
+    async function pickMicId() {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const mics = devices.filter((d) => d.kind === "audioinput");
+      const hit = mics.find((d) => /tinyusb|usbpods|pico/i.test(d.label || ""));
+      if (hit) return { deviceId: hit.deviceId, label: hit.label };
+      const def = mics.find((d) => d.deviceId === "default") || mics[0];
+      return def ? { deviceId: def.deviceId, label: def.label || "default mic" } : { deviceId: undefined, label: "default mic" };
+    }
+
+    function pcmToWav(float32, sampleRate) {
+      const n = float32.length;
+      const buf = new ArrayBuffer(44 + n * 2);
+      const v = new DataView(buf);
+      const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+      w(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); w(8, "WAVE");
+      w(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
+      v.setUint16(22, 1, true); v.setUint32(24, sampleRate, true);
+      v.setUint32(28, sampleRate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+      w(36, "data"); v.setUint32(40, n * 2, true);
+      let o = 44;
+      for (let i = 0; i < n; i++) {
+        let s = Math.max(-1, Math.min(1, float32[i]));
+        v.setInt16(o, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+        o += 2;
+      }
+      return new Blob([buf], { type: "audio/wav" });
+    }
+
+    function addClip(blob, gainDb, srcLabel) {
+      const url = URL.createObjectURL(blob);
+      const wrap = document.createElement("div");
+      wrap.style.margin = "0.55rem 0";
+      const meta = document.createElement("div");
+      meta.className = "sub";
+      meta.textContent = gainDb + " dB · " + srcLabel;
+      const audio = document.createElement("audio");
+      audio.controls = true;
+      audio.src = url;
+      audio.style.width = "100%";
+      audio.style.marginTop = "0.25rem";
+      wrap.appendChild(meta);
+      wrap.appendChild(audio);
+      clipsEl.insertBefore(wrap, clipsEl.firstChild);
+      while (clipsEl.children.length > 2) {
+        const old = clipsEl.lastElementChild;
+        const a = old.querySelector("audio");
+        if (a && a.src) URL.revokeObjectURL(a.src);
+        clipsEl.removeChild(old);
+      }
+    }
+
+    $("btnRec").onclick = async () => {
+      if (recording) return;
+      recording = true;
+      $("btnRec").disabled = true;
+      setErr("");
+      recState("requesting mic…", false);
+      let stream = null;
+      let ctx = null;
+      try {
+        let probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+        probe.getTracks().forEach((t) => t.stop());
+        const pick = await pickMicId();
+        const audio = {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          channelCount: 1
+        };
+        if (pick.deviceId) audio.deviceId = { exact: pick.deviceId };
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ audio });
+        } catch (_) {
+          delete audio.deviceId;
+          stream = await navigator.mediaDevices.getUserMedia({ audio });
+        }
+        recState("recording 3s · " + pick.label, true);
+        log("mic clip from: " + pick.label);
+        ctx = new AudioContext();
+        const src = ctx.createMediaStreamSource(stream);
+        const proc = ctx.createScriptProcessor(4096, 1, 1);
+        const chunks = [];
+        proc.onaudioprocess = (ev) => {
+          chunks.push(new Float32Array(ev.inputBuffer.getChannelData(0)));
+        };
+        const mute = ctx.createGain();
+        mute.gain.value = 0;
+        src.connect(proc);
+        proc.connect(mute);
+        mute.connect(ctx.destination);
+        await new Promise((r) => setTimeout(r, 3000));
+        proc.disconnect();
+        src.disconnect();
+        const total = chunks.reduce((n, c) => n + c.length, 0);
+        const pcm = new Float32Array(total);
+        let o = 0;
+        for (const c of chunks) { pcm.set(c, o); o += c.length; }
+        const blob = pcmToWav(pcm, ctx.sampleRate);
+        const g = $("gain").value;
+        addClip(blob, g, pick.label);
+        recState("idle", true);
+        log("saved 3s clip at " + g + " dB (" + Math.round(pcm.length / ctx.sampleRate * 10) / 10 + "s)");
+      } catch (e) {
+        setErr(e.message);
+        recState("failed", false);
+        log("record failed: " + e.message);
+      } finally {
+        if (ctx) try { await ctx.close(); } catch (_) {}
+        if (stream) stream.getTracks().forEach((t) => t.stop());
+        recording = false;
+        $("btnRec").disabled = false;
+      }
+    };
+
+
 
     if (location.protocol !== "https:" && location.hostname !== "localhost" && location.hostname !== "127.0.0.1") {
       setErr("Open this page over HTTPS (GitHub Pages) or http://localhost — browsers block WebHID/Web Serial on file://");
