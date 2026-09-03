@@ -73,7 +73,17 @@ Byte 0 = `0x01` (STATUS).
 | 30 | adaptive volume |
 | 31 | sleep detection |
 
-Name/model/serial/fw and last-19 hex also appear on the CDC `@STATUS` line (WebHID has no room for strings).
+Name/model/serial/fw and last-19 hex also appear on the CDC `@STATUS` line (WebHID has no room for strings). AVRCP `vol` is **serial-only** (not in the 32-byte HID report). HID byte 14 is **UAC mic mute**, not speaker mute. The Pages UI shows both when present.
+
+## Settings page diagnostics
+
+GitHub Pages (`web/index.html`) can connect WebHID / Web Serial and:
+
+- Log STATUS **transitions** (not the 1 s poll) plus a 10 s heartbeat
+- Highlight ear on-head ↔ off-head (off-head may HID-pause the host)
+- Scope **getUserMedia** (mic monitor) and a **Speaker test** Oscillator via `setSinkId` when the browser allows it
+
+**Browsers cannot tap Teams/YouTube PCM.** The speaker canvas is the page’s own test tone, not system playback. USB output activity on the page is A2DP / AVRCP vol / UAC mic mute / CA duck inferred from HID or `@STATUS`.
 
 ## CDC text
 

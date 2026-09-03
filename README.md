@@ -69,6 +69,13 @@ A normal PC Bluetooth connection that needs the AirPods microphone drops A2DP an
 
 Chrome or Edge, HTTPS (GitHub Pages) or `http://localhost`. Click **Connect device**, pick **TinyUSB BT** (HID). If HID is missing, pick the serial port **USBPods Max Console**. No driver, no install, no Test Mode.
 
+The page’s **Diagnostics / Scope** section is for cutouts (Teams/YouTube silent while the USB device stays present):
+
+1. Connect HID. Watch **Why silent?** — especially Ear on-head vs off-head (off-head can HID-pause the host) and A2DP up/down.
+2. **Speaker test** plays a tone/sweep from the page and scopes *that* waveform. Use `setSinkId` to TinyUSB BT when Chrome exposes it. **Browsers cannot tap Teams or YouTube PCM.** If the test is audible in the cans, the USB speaker path works; if not, check A2DP / off-head / Windows default device.
+3. **Start mic monitor** opens the UAC input (TinyUSB/USBPods/Pico label, same picker as Record 3s) and shows a live oscilloscope + peak/RMS. Compare “mic stream open” with the HID mic flag.
+4. When audio dies, **Copy log** or **Download log** and paste it into an issue. The log is transitions + a 10s heartbeat, not every 1s STATUS poll.
+
 Enable Pages: repo Settings → Pages → GitHub Actions (workflow [`.github/workflows/pages.yml`](.github/workflows/pages.yml) publishes `web/`).
 
 ### Serial console
@@ -84,6 +91,7 @@ Logs (`[AACP]` `[MIC]` `[DEC]`) share this port. Attach them when filing issues.
 ### Troubleshooting
 
 - **Speakers silent, mic maybe still works:** host Bluetooth owns the Max 2. Forget the device on the Mac/PC.
+- **Teams/YouTube silent, TinyUSB BT still listed:** the browser cannot tap system PCM. On the settings page run **Speaker test** (scopes the page’s own tone) and watch **Ear** / **A2DP** transitions in the diagnostic log. Off-head can HID-pause the host while the USB device remains. Copy the log when it cuts.
 - **Mic level 0 after reflash:** unplug/replug so Windows drops the cached device.
 - **Watchdog loop / audio dies seconds after play:** you skipped the TinyUSB 0.18 panic patch (below).
 
