@@ -20,6 +20,7 @@
 #include "btstack/btstack_avdtp_source.h"
 #include "btstack/btstack_hci.h"
 #include "btstack/btstack_aacp.h"
+#include "tinyusb/uac.h"
 
 // ---- latched requests (USB IRQ → main loop) ----
 static volatile bool req_pair = false;
@@ -141,6 +142,7 @@ void control_print_status_human(void) {
            "owns=%u duck=%u autocon=%u allowauto=%u earen=%u gestures=%u hold=%u "
            "crown=%u autoans=%u chime=%u adaptvol=%u sleep=%u listen=%u "
            "last19=%s vol=%u name=%s model=%s serial=%s fw=%s findmy=unsupported "
+           "spk_misalign=%lu "
            "addr=%02x:%02x:%02x:%02x:%02x:%02x\n",
            (buf[1] & 0x01) ? 1 : 0,
            (buf[1] & 0x02) ? 1 : 0,
@@ -159,6 +161,7 @@ void control_print_status_human(void) {
            aacp_get_dev_model()[0] ? aacp_get_dev_model() : "-",
            aacp_get_dev_serial()[0] ? aacp_get_dev_serial() : "-",
            aacp_get_dev_fw()[0] ? aacp_get_dev_fw() : "-",
+           (unsigned long) usb_spk_misalign_count(),
            buf[16], buf[17], buf[18], buf[19], buf[20], buf[21]);
 }
 

@@ -24,6 +24,7 @@
 
 #include "btstack.h"
 #include "btstack_aacp.h"
+#include "aacp_ear.h"
 #include "aacp_mic_dec.h"
 #include "../hid_consumer.h"
 #include "../pico_w_led.h"
@@ -145,8 +146,10 @@ static uint32_t aacp_imu_last_log_ms = 0;
 
 // Auto-pause: AAP Definitions 0x00=InEar (ON HEAD), 0x01=Out, 0x02=InCase.
 // Max 2 0x00/0x00 while worn is ON. Debounce ~200ms.
-// Apple-style: take-off Pause only if playing (resume_pending); put-on Play
-// only if resume_pending. Never HID Play/Pause toggle. First packet: no HID.
+// Apple Max pauses if you lift ONE cup (support.apple.com/108364). LibrePods
+// linux default PauseWhenOneRemoved. Never HID Play/Pause toggle.
+// Take-off Pause only if A2DP is streaming (resume_pending); put-on Play
+// only if resume_pending. First packet: no HID.
 #define EAR_DEBOUNCE_MS 200
 static bool aacp_ear_known = false;
 static bool aacp_ear_off_head = false;
@@ -532,10 +535,22 @@ static void aacp_ear_timer_fired(btstack_timer_source_t *ts) {
     if (!aacp_ear_known) {
         aacp_ear_known = true;
         aacp_ear_off_head = now_off;
+        printf("[AACP] ear HID skip (first packet after connect, off-head=%u)\n",
+               (unsigned) now_off);
         return; // first ear packet after connect: do not start Music
     }
-    if (now_off == aacp_ear_off_head) return;
+    if (now_off == aacp_ear_off_head) {
+        printf("[AACP] ear HID skip (no change, off-head=%u)\n", (unsigned) now_off);
+        return;
+    }
     aacp_ear_off_head = now_off;
+
+    // Ear-detect enable 0x0A: 0x02 = off (LibrePods Boolean). Do not HID.
+    if (aacp_ear_en == 0x02) {
+        printf("[AACP] ear HID skip (ear detection disabled, off-head=%u)\n",
+               (unsigned) now_off);
+        return;
+    }
 
     // 0x00 = on-head (AAP Definitions). Do not invert. Discrete Play/Pause
     // — never HID Play/Pause toggle (that starts Music when already paused).
@@ -548,7 +563,7 @@ static void aacp_ear_timer_fired(btstack_timer_source_t *ts) {
             aacp_resume_pending = true;
             printf("[AACP] ear OFF-HEAD → HID Pause (resume pending)\n");
         } else {
-            printf("[AACP] ear OFF-HEAD (already paused, no HID)\n");
+            printf("[AACP] ear OFF-HEAD skip HID Pause (A2DP not streaming)\n");
         }
     } else {
         // Put on: Play only if we paused on take-off. Stay paused otherwise.
@@ -557,7 +572,7 @@ static void aacp_ear_timer_fired(btstack_timer_source_t *ts) {
             aacp_resume_pending = false;
             printf("[AACP] ear ON-HEAD → HID Play (resume)\n");
         } else {
-            printf("[AACP] ear ON-HEAD (stay paused)\n");
+            printf("[AACP] ear ON-HEAD skip HID Play (stay paused, no resume_pending)\n");
         }
     }
 }
@@ -567,11 +582,13 @@ static void aacp_ear_consider(uint8_t el, uint8_t er) {
     // Live Max 2 often reports L=0 R=0 while worn — that is ON, not a miss.
     // 0xFF unknown: do not pause.
     if (el == 0xFF || er == 0xFF) return;
-    bool off = (el != 0x00) && (er != 0x00);
+    bool off = aacp_ear_is_off_head(el, er);
     if (aacp_ear_pending && aacp_ear_pending_off == off) return;
     if (aacp_ear_known && !aacp_ear_pending && aacp_ear_off_head == off) return;
     aacp_ear_pending = true;
     aacp_ear_pending_off = off;
+    printf("[AACP] ear debounce %u ms → off-head=%u (either cup out)\n",
+           (unsigned) EAR_DEBOUNCE_MS, (unsigned) off);
     btstack_run_loop_remove_timer(&aacp_ear_timer);
     btstack_run_loop_set_timer_handler(&aacp_ear_timer, aacp_ear_timer_fired);
     btstack_run_loop_set_timer(&aacp_ear_timer, EAR_DEBOUNCE_MS);
@@ -748,8 +765,9 @@ static void aacp_handle_control(const uint8_t *pkt, uint16_t size) {
         if (el != aacp_ear_left || er != aacp_ear_right) {
             aacp_ear_left = el;
             aacp_ear_right = er;
-            printf("[AACP] ear L=%u R=%u (0=on-head 1=out 2=case)\n",
-                   (unsigned) el, (unsigned) er);
+            printf("[AACP] ear L=%u R=%u (0=on-head 1=out 2=case) off-head=%u\n",
+                   (unsigned) el, (unsigned) er,
+                   (unsigned) aacp_ear_is_off_head(el, er));
             aacp_ear_consider(el, er);
         }
         return;
