@@ -555,7 +555,7 @@ void tinyusb_control_task(void){
 
    // Mac Apple Music via USB should steal Max 2 back from the iPhone.
    if (ITF_NUM_AUDIO_STREAMING_SPK == itf && alt != 0) {
-       if (!get_a2dp_connected_flag()) {
+       if (!get_a2dp_connected_flag() || !check_is_streaming()) {
            control_request_reconnect();
        }
    }

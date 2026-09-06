@@ -30,6 +30,10 @@ void aacp_connect(bd_addr_t addr);
 // Tear down the AACP channel if open.
 void aacp_disconnect(void);
 
+// Re-send LibrePods 0x06 own + 0x20 auto-connect if the AACP channel is up.
+// Call after A2DP steal/release; do not tear the channel down.
+void aacp_reassert_ownership(void);
+
 // True once the channel is open (handshake may still be in flight).
 bool aacp_is_connected(void);
 

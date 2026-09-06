@@ -31,6 +31,7 @@
 
 // A2DP streaming is the play-status signal (play_info.status is never updated).
 bool check_is_streaming(void);
+bool get_a2dp_connected_flag(void);
 
 #define AACP_PSM              0x1001
 // Requested local MTU. BTstack clamps this to l2cap_max_mtu() =
@@ -41,7 +42,7 @@ bool check_is_streaming(void);
 #define AACP_LOCAL_MTU        4096
 #define AACP_CONNECT_DELAY_MS 1500   // let A2DP settle before opening the channel
 #define AACP_RETRY_DELAY_MS   3000   // delay between connect retries
-#define AACP_MAX_ATTEMPTS     3      // initial attempt + retries per A2DP session
+#define AACP_MAX_ATTEMPTS     10     // steal/reclaim: 3 was giving up → BOOTSEL
 
 // Mic lifecycle: the ONLY trigger is the USB alt setting — main.c calls
 // aacp_mic_start()/aacp_mic_stop() when the host opens/closes the recording
@@ -145,20 +146,17 @@ static uint8_t aacp_last19_bud  = 0;
 static uint32_t aacp_imu_last_log_ms = 0;
 
 // Auto-pause: AAP Definitions 0x00=InEar (ON HEAD), 0x01=Out, 0x02=InCase.
-// Max 2 0x00/0x00 while worn is ON. Debounce ~200ms.
+// Max 2 0x00/0x00 while worn is ON. Off-head = either cup out (PR #5).
 // Apple Max pauses if you lift ONE cup (support.apple.com/108364). LibrePods
 // linux default PauseWhenOneRemoved. Never HID Play/Pause toggle.
-// Take-off Pause only if A2DP is streaming (resume_pending); put-on Play
-// only if resume_pending. First packet: no HID.
-#define EAR_DEBOUNCE_MS 200
-static bool aacp_ear_known = false;
-static bool aacp_ear_off_head = false;
-static bool aacp_ear_pending = false;
-static bool aacp_ear_pending_off = false;
-static bool aacp_resume_pending = false;
+// Take-off Pause (~200 ms) if A2DP is streaming; put-on Play only if
+// resume_pending AND on-head is stable for AACP_EAR_RESUME_HOLD_MS (live
+// bounce L=0 R=0 after Pause was sending Play ~200 ms later).
+static aacp_ear_sm_t aacp_ear;
 static btstack_timer_source_t aacp_ear_timer;
 
 static bool aacp_send_control_cmd(uint8_t id, uint8_t v1, uint8_t v2);
+static void aacp_schedule_retry(void);
 static bool aacp_prefs_need_persist = false;
 
 static void aacp_status_reset(void) {
@@ -169,10 +167,7 @@ static void aacp_status_reset(void) {
     aacp_owns = 0;
     aacp_ca_duck_q8 = 255;
     aacp_ca_level = 0;
-    aacp_ear_known = false;
-    aacp_ear_off_head = false;
-    aacp_ear_pending = false;
-    aacp_resume_pending = false;
+    aacp_ear_sm_reset(&aacp_ear);
     aacp_last19_hex[0] = 0;
     aacp_last19_type = 0;
     aacp_last19_bud = 0;
@@ -234,6 +229,7 @@ static void aacp_do_connect(btstack_timer_source_t *ts) {
     if (status != ERROR_CODE_SUCCESS) {
         printf("[AACP] l2cap_create_channel failed: 0x%02x\n", status);
         aacp_cid = 0;
+        aacp_schedule_retry();
     }
 }
 
@@ -356,6 +352,16 @@ static void aacp_queue_host_ownership(void) {
     printf("[AACP] skip 0x14/0x15 click modes (no packet values; host maps 0x0019)\n");
     printf("[AACP] skip 0x36 Allow Auto Connect (Android: 0x20 is the one used)\n");
     printf("[AACP] skip head gestures (no Classic AACP packet in LibrePods)\n");
+}
+
+void aacp_reassert_ownership(void) {
+    // LibrePods takeOver: 0x06 own + 0x20 auto-connect. No invented opcodes.
+    if (aacp_cid == 0 || !aacp_connected) return;
+    aacp_send_control_cmd(0x06, 0x01, 0x00);
+    aacp_send_control_cmd(0x20, aacp_auto_conn ? aacp_auto_conn : 0x01, 0x00);
+    aacp_owns = 1;
+    printf("[AACP] reassert own=1 auto-conn=0x%02x (A2DP steal/release)\n",
+           (unsigned) (aacp_auto_conn ? aacp_auto_conn : 0x01));
 }
 
 static void aacp_queue_init_sequence(void) {
@@ -529,51 +535,38 @@ static uint8_t aacp_ca_duck_from_level(uint8_t level) {
 
 static void aacp_ear_timer_fired(btstack_timer_source_t *ts) {
     UNUSED(ts);
-    if (!aacp_ear_pending) return;
-    aacp_ear_pending = false;
-    bool now_off = aacp_ear_pending_off;
-    if (!aacp_ear_known) {
-        aacp_ear_known = true;
-        aacp_ear_off_head = now_off;
-        printf("[AACP] ear HID skip (first packet after connect, off-head=%u)\n",
-               (unsigned) now_off);
-        return; // first ear packet after connect: do not start Music
-    }
-    if (now_off == aacp_ear_off_head) {
-        printf("[AACP] ear HID skip (no change, off-head=%u)\n", (unsigned) now_off);
-        return;
-    }
-    aacp_ear_off_head = now_off;
-
-    // Ear-detect enable 0x0A: 0x02 = off (LibrePods Boolean). Do not HID.
-    if (aacp_ear_en == 0x02) {
-        printf("[AACP] ear HID skip (ear detection disabled, off-head=%u)\n",
-               (unsigned) now_off);
-        return;
-    }
-
-    // 0x00 = on-head (AAP Definitions). Do not invert. Discrete Play/Pause
-    // — never HID Play/Pause toggle (that starts Music when already paused).
-    if (now_off) {
-        // Take off: Pause only if media is playing, then remember to resume.
-        // play_info.status is never updated; A2DP streaming is the playing signal.
-        bool playing = check_is_streaming();
-        if (playing) {
+    aacp_ear_act_t act = aacp_ear_fire(&aacp_ear, aacp_ear_en == 0x02,
+                                       check_is_streaming());
+    switch (act) {
+        case AACP_EAR_ACT_NONE:
+            break;
+        case AACP_EAR_ACT_SKIP_FIRST:
+            printf("[AACP] ear HID skip (first packet after connect, off-head=%u)\n",
+                   (unsigned) aacp_ear.off_head);
+            break;
+        case AACP_EAR_ACT_SKIP_NOCHANGE:
+            printf("[AACP] ear HID skip (no change, off-head=%u)\n",
+                   (unsigned) aacp_ear.off_head);
+            break;
+        case AACP_EAR_ACT_SKIP_DISABLED:
+            printf("[AACP] ear HID skip (ear detection disabled, off-head=%u)\n",
+                   (unsigned) aacp_ear.off_head);
+            break;
+        case AACP_EAR_ACT_PAUSE:
             hid_consumer_pause();
-            aacp_resume_pending = true;
             printf("[AACP] ear OFF-HEAD → HID Pause (resume pending)\n");
-        } else {
+            break;
+        case AACP_EAR_ACT_SKIP_NOT_STREAMING:
             printf("[AACP] ear OFF-HEAD skip HID Pause (A2DP not streaming)\n");
-        }
-    } else {
-        // Put on: Play only if we paused on take-off. Stay paused otherwise.
-        if (aacp_resume_pending) {
+            break;
+        case AACP_EAR_ACT_PLAY:
             hid_consumer_play();
-            aacp_resume_pending = false;
-            printf("[AACP] ear ON-HEAD → HID Play (resume)\n");
-        } else {
+            printf("[AACP] ear ON-HEAD → HID Play (resume after %u ms hold)\n",
+                   (unsigned) AACP_EAR_RESUME_HOLD_MS);
+            break;
+        case AACP_EAR_ACT_SKIP_STAY_PAUSED:
             printf("[AACP] ear ON-HEAD skip HID Play (stay paused, no resume_pending)\n");
-        }
+            break;
     }
 }
 
@@ -581,17 +574,18 @@ static void aacp_ear_consider(uint8_t el, uint8_t er) {
     // 0x00 = In Ear = ON HEAD (AAP Definitions / linux eardetection.hpp).
     // Live Max 2 often reports L=0 R=0 while worn — that is ON, not a miss.
     // 0xFF unknown: do not pause.
-    if (el == 0xFF || er == 0xFF) return;
-    bool off = aacp_ear_is_off_head(el, er);
-    if (aacp_ear_pending && aacp_ear_pending_off == off) return;
-    if (aacp_ear_known && !aacp_ear_pending && aacp_ear_off_head == off) return;
-    aacp_ear_pending = true;
-    aacp_ear_pending_off = off;
-    printf("[AACP] ear debounce %u ms → off-head=%u (either cup out)\n",
-           (unsigned) EAR_DEBOUNCE_MS, (unsigned) off);
+    uint32_t delay = aacp_ear_consider_delay(&aacp_ear, el, er);
+    if (delay == 0) return;
+    if (!aacp_ear.pending_off && aacp_ear.resume_pending) {
+        printf("[AACP] ear debounce %u ms → off-head=0 (resume hold, ignore bounce)\n",
+               (unsigned) delay);
+    } else {
+        printf("[AACP] ear debounce %u ms → off-head=%u (either cup out)\n",
+               (unsigned) delay, (unsigned) aacp_ear.pending_off);
+    }
     btstack_run_loop_remove_timer(&aacp_ear_timer);
     btstack_run_loop_set_timer_handler(&aacp_ear_timer, aacp_ear_timer_fired);
-    btstack_run_loop_set_timer(&aacp_ear_timer, EAR_DEBOUNCE_MS);
+    btstack_run_loop_set_timer(&aacp_ear_timer, delay);
     btstack_run_loop_add_timer(&aacp_ear_timer);
 }
 
@@ -840,6 +834,14 @@ static void aacp_handle_control(const uint8_t *pkt, uint16_t size) {
         return;
     }
 
+    if (opcode == 0x002E) {
+        // opcodes.md: 0x002E Host ← list of connected devices (receive).
+        // Live steal: iPhone BD_ADDR in this packet. Dump only — layout file
+        // is not in LibrePods docs tree; do not invent a reply or 0x002D.
+        aacp_dump_hex("0x002E connected-devices", pkt, size);
+        return;
+    }
+
     if (opcode == 0x0058) {
         return; // non-audio 0x58 already filtered; ignore leftovers
     }
@@ -1053,6 +1055,12 @@ static void aacp_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *
                     aacp_tx_count  = 0;
                     aacp_mic_teardown();
                     aacp_status_reset();
+                    // Dual-connect steal can drop AACP while A2DP signaling
+                    // is still up (or coming back). Retry without BOOTSEL.
+                    if (get_a2dp_connected_flag()) {
+                        printf("[AACP] closed while A2DP up — retry connect\n");
+                        aacp_connect(aacp_addr);
+                    }
                     break;
                 default:
                     break;
