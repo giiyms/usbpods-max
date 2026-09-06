@@ -26,6 +26,9 @@
 void audio_slot_queue_init(void);
 void audio_slot_queue_configure(uint16_t samples_per_slot);
 void audio_slot_push_samples(const int16_t *src, uint16_t stereo_pair_count);
+// Drop a half-filled slot (USB speaker alt-set / stream start). Keeps L/R
+// pairs aligned; does not invent samples.
+void audio_slot_reset_filling(void);
 
 bool check_is_streaming();
 

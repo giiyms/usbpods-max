@@ -580,15 +580,31 @@ void audio_slot_queue_configure(uint16_t samples_per_slot) {
     audio_slot_queue_configure_with_count(samples_per_slot, active_slot_count);
 }
 
+void audio_slot_reset_filling(void) {
+    if (filling_slot_valid) {
+        queue_try_add(&free_queue, &filling_slot_idx);
+        filling_slot_valid = false;
+    }
+    filling_offset = 0;
+}
+
 void audio_slot_push_samples(const int16_t *src, uint16_t stereo_pair_count) {
     uint16_t remaining = stereo_pair_count * 2; // total int16_t values
     uint16_t src_offset = 0;
+
+    // Never start or continue on an odd int16 offset — that swaps L/R until
+    // the next stream reset.
+    if (filling_offset & 1u) {
+        filling_offset &= (uint16_t)~1u;
+        printf("[A2DP] slot fill snapped even (odd offset would swap L/R)\n");
+    }
+    remaining &= (uint16_t)~1u;
 
     while (remaining > 0) {
         // Acquire a filling slot if we don't have one
         if (!filling_slot_valid) {
             if (!queue_try_remove(&free_queue, &filling_slot_idx)) {
-                return; // no free slots, drop samples
+                return; // no free slots, drop remaining whole frames
             }
             filling_slot_valid = true;
             filling_offset = 0;
@@ -597,6 +613,10 @@ void audio_slot_push_samples(const int16_t *src, uint16_t stereo_pair_count) {
         // Copy as much as fits into the current slot
         uint16_t space = slot_frame_int16 - filling_offset;
         uint16_t to_copy = (remaining < space) ? remaining : space;
+        to_copy &= (uint16_t)~1u; // whole L/R pairs only
+        if (to_copy == 0) {
+            return;
+        }
         memcpy(&slot_pool[filling_slot_idx].data[filling_offset],
                &src[src_offset], to_copy * sizeof(int16_t));
         filling_offset += to_copy;

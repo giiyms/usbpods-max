@@ -73,7 +73,7 @@ Byte 0 = `0x01` (STATUS).
 | 30 | adaptive volume |
 | 31 | sleep detection |
 
-Name/model/serial/fw and last-19 hex also appear on the CDC `@STATUS` line (WebHID has no room for strings). AVRCP `vol` is **serial-only** (not in the 32-byte HID report). HID byte 14 is **UAC mic mute**, not speaker mute. The Pages UI shows both when present.
+Name/model/serial/fw and last-19 hex also appear on the CDC `@STATUS` line (WebHID has no room for strings). AVRCP `vol` is **serial-only** (not in the 32-byte HID report). HID byte 14 is **UAC mic mute**, not speaker mute. The Pages UI shows both when present. `@STATUS` also reports `spk_misalign=` (USB speaker leftover 1–3 byte events; 0 is healthy).
 
 ## Settings page diagnostics
 

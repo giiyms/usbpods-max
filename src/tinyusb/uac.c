@@ -30,6 +30,7 @@
  #include "tusb.h"
  #include "usb_descriptors.h"
  #include "debug_cdc.h"
+ #include "spk_frame_align.h"
 
  #include "../btstack/btstack_avdtp_source.h"
  #include "../btstack/aacp_mic_dec.h"
@@ -123,6 +124,18 @@ int16_t volume[CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX + 1];    // +1 for master chan
  int32_t spk_buf[CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_SZ / 4];
  // Speaker data size received in the last frame
  int spk_data_size;
+ static spk_frame_align_t spk_align;
+ static uint32_t spk_misalign_last_log;
+
+ static void spk_stream_reset(void) {
+   spk_data_size = 0;
+   spk_frame_align_reset(&spk_align);
+   audio_slot_reset_filling();
+ }
+
+ uint32_t usb_spk_misalign_count(void) {
+   return spk_align.misalign;
+ }
  // Resolution per format
  const uint8_t resolutions_per_format[CFG_TUD_AUDIO_FUNC_1_N_FORMATS] = {CFG_TUD_AUDIO_FUNC_1_FORMAT_1_RESOLUTION_RX,
                                                                          CFG_TUD_AUDIO_FUNC_1_FORMAT_2_RESOLUTION_RX};
@@ -516,8 +529,10 @@ void tinyusb_control_task(void){
    uint8_t const itf = tu_u16_low(tu_le16toh(p_request->wIndex));
    uint8_t const alt = tu_u16_low(tu_le16toh(p_request->wValue));
 
-   if (ITF_NUM_AUDIO_STREAMING_SPK == itf && alt == 0)
+   if (ITF_NUM_AUDIO_STREAMING_SPK == itf && alt == 0) {
        blink_interval_ms = BLINK_MOUNTED;
+       spk_stream_reset();
+   }
 
    if (ITF_NUM_AUDIO_STREAMING_MIC == itf && alt == 0)
    {
@@ -554,8 +569,15 @@ void tinyusb_control_task(void){
        return true;
    }
 
-   // Clear buffer when streaming format is changed
-   spk_data_size = 0;
+   // Speaker alt-set / stream start: drop sticky remainder and any
+   // half-filled A2DP slot so L/R cannot stick across a format change.
+   if (ITF_NUM_AUDIO_STREAMING_SPK == itf) {
+     spk_stream_reset();
+     printf("[USB] speaker alt %d (remainder+slot fill reset, spk_misalign=%lu)\n",
+            alt, (unsigned long) spk_align.misalign);
+   } else {
+     spk_data_size = 0;
+   }
    if(alt != 0)
    {
      current_resolution = resolutions_per_format[alt-1];
@@ -582,20 +604,39 @@ void tinyusb_control_task(void){
     set_usb_streaming(true);
     if (current_resolution == 16)
     {
-      int16_t *src = (int16_t *)spk_buf;
-      uint16_t sample_count = spk_data_size / 4; // should be 44-45
+      uint8_t *bytes = (uint8_t *)spk_buf;
+      uint16_t n = (uint16_t)spk_data_size;
+      uint16_t cap = (uint16_t)sizeof(spk_buf);
+      uint32_t mis_before = spk_align.misalign;
+      uint16_t aligned = spk_frame_align_ingest(&spk_align, bytes, n, cap);
+      uint16_t sample_count = aligned / SPK_STEREO_FRAME_BYTES;
 
-      // Conversation Awareness speaking ducks A2DP out only — never the mic.
-      uint8_t duck = aacp_get_ca_duck_q8();
-      if (duck < 255) {
-        int16_t *s = src;
-        uint32_t n = (uint32_t) sample_count * 2;
-        for (uint32_t i = 0; i < n; i++) {
-          s[i] = (int16_t)(((int32_t) s[i] * (int32_t) duck) >> 8);
+      if (spk_align.misalign != mis_before) {
+        uint32_t now = uac_now_ms();
+        if (spk_align.misalign == 1 ||
+            (int32_t)(now - spk_misalign_last_log) >= 1000) {
+          printf("[USB] spk_misalign=%lu leftover=%u (sticky remainder, not pushed)\n",
+                 (unsigned long) spk_align.misalign,
+                 (unsigned) spk_align.rem_len);
+          spk_misalign_last_log = now;
         }
       }
 
-      audio_slot_push_samples(src, sample_count);
+      if (sample_count) {
+        int16_t *src = (int16_t *)bytes;
+
+        // Conversation Awareness speaking ducks A2DP out only — never the mic.
+        uint8_t duck = aacp_get_ca_duck_q8();
+        if (duck < 255) {
+          int16_t *s = src;
+          uint32_t ns = (uint32_t) sample_count * 2;
+          for (uint32_t i = 0; i < ns; i++) {
+            s[i] = (int16_t)(((int32_t) s[i] * (int32_t) duck) >> 8);
+          }
+        }
+
+        audio_slot_push_samples(src, sample_count);
+      }
 
       is_usb_audio_running = true;
       spk_data_size = 0;
