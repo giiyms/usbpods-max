@@ -71,6 +71,10 @@ const char *aacp_get_dev_model(void);
 const char *aacp_get_dev_serial(void);
 const char *aacp_get_dev_fw(void);
 
+// Re-send LibrePods 0x06 owns + 0x20 auto-conn. Call after dual-connect steal
+// while AACP is still up. Does not invent hijack/0x0E blobs.
+void aacp_reassert_ownership(void);
+
 // Send documented control commands (opcode 0x0009). Returns false if the
 // channel is not open. mode: 1-4 as above. ca: 1=on, 2=off.
 bool aacp_set_noise_mode(uint8_t mode);

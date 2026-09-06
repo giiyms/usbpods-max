@@ -20,4 +20,17 @@ static inline bool aacp_ear_is_off_head(uint8_t el, uint8_t er) {
     return (el != 0x00) || (er != 0x00);
 }
 
+// Take-off: 200 ms either-cup-out → HID Pause (keep snappy).
+// Resume: Max sensors bounce L=1 R=0 → L=1 R=1 → Pause → L=0 R=1 →
+// L=0 R=0 (false on-head). 200 ms then fired HID Play and YouTube
+// resumed. Require BOTH cups 0x00 continuously for 1.5 s after we
+// paused before HID Play. Never Play/Pause toggle.
+#define AACP_EAR_OFF_DEBOUNCE_MS   200
+#define AACP_EAR_RESUME_STABLE_MS 1500
+
+static inline uint32_t aacp_ear_commit_delay_ms(bool now_off, bool resume_pending) {
+    if (!now_off && resume_pending) return AACP_EAR_RESUME_STABLE_MS;
+    return AACP_EAR_OFF_DEBOUNCE_MS;
+}
+
 #endif // USBPODS_AACP_EAR_H
