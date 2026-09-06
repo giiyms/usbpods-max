@@ -145,12 +145,12 @@ static uint8_t aacp_last19_bud  = 0;
 static uint32_t aacp_imu_last_log_ms = 0;
 
 // Auto-pause: AAP Definitions 0x00=InEar (ON HEAD), 0x01=Out, 0x02=InCase.
-// Max 2 0x00/0x00 while worn is ON. Debounce ~200ms.
+// Max 2 0x00/0x00 while worn is ON. Debounce: 200 ms off-head, 1500 ms
+// on-head after we paused (Max sensor bounce L=0 R=0 after take-off).
 // Apple Max pauses if you lift ONE cup (support.apple.com/108364). LibrePods
 // linux default PauseWhenOneRemoved. Never HID Play/Pause toggle.
 // Take-off Pause only if A2DP is streaming (resume_pending); put-on Play
 // only if resume_pending. First packet: no HID.
-#define EAR_DEBOUNCE_MS 200
 static bool aacp_ear_known = false;
 static bool aacp_ear_off_head = false;
 static bool aacp_ear_pending = false;
@@ -570,7 +570,8 @@ static void aacp_ear_timer_fired(btstack_timer_source_t *ts) {
         if (aacp_resume_pending) {
             hid_consumer_play();
             aacp_resume_pending = false;
-            printf("[AACP] ear ON-HEAD → HID Play (resume)\n");
+            printf("[AACP] ear ON-HEAD → HID Play (resume, stable %u ms)\n",
+                   (unsigned) AACP_EAR_RESUME_STABLE_MS);
         } else {
             printf("[AACP] ear ON-HEAD skip HID Play (stay paused, no resume_pending)\n");
         }
@@ -587,11 +588,17 @@ static void aacp_ear_consider(uint8_t el, uint8_t er) {
     if (aacp_ear_known && !aacp_ear_pending && aacp_ear_off_head == off) return;
     aacp_ear_pending = true;
     aacp_ear_pending_off = off;
-    printf("[AACP] ear debounce %u ms → off-head=%u (either cup out)\n",
-           (unsigned) EAR_DEBOUNCE_MS, (unsigned) off);
+    uint32_t delay = aacp_ear_commit_delay_ms(off, aacp_resume_pending);
+    if (!off && aacp_resume_pending) {
+        printf("[AACP] ear debounce %u ms → off-head=0 (resume wait, ignore bounce)\n",
+               (unsigned) delay);
+    } else {
+        printf("[AACP] ear debounce %u ms → off-head=%u (either cup out)\n",
+               (unsigned) delay, (unsigned) off);
+    }
     btstack_run_loop_remove_timer(&aacp_ear_timer);
     btstack_run_loop_set_timer_handler(&aacp_ear_timer, aacp_ear_timer_fired);
-    btstack_run_loop_set_timer(&aacp_ear_timer, EAR_DEBOUNCE_MS);
+    btstack_run_loop_set_timer(&aacp_ear_timer, delay);
     btstack_run_loop_add_timer(&aacp_ear_timer);
 }
 
@@ -840,6 +847,15 @@ static void aacp_handle_control(const uint8_t *pkt, uint16_t size) {
         return;
     }
 
+    if (opcode == 0x002D || opcode == 0x002E) {
+        // LibrePods opcodes.md: 0x2D req / 0x2E list of connected devices.
+        // Live dual-connect steal shows the iPhone MAC here. Dump only.
+        aacp_dump_hex(opcode == 0x002E ? "0x002E connected-devices" :
+                                         "0x002D connected-dev-req",
+                      pkt, size);
+        return;
+    }
+
     if (opcode == 0x0058) {
         return; // non-audio 0x58 already filtered; ignore leftovers
     }
@@ -894,6 +910,19 @@ const char *aacp_get_dev_name(void)   { return aacp_dev_name; }
 const char *aacp_get_dev_model(void)  { return aacp_dev_model; }
 const char *aacp_get_dev_serial(void) { return aacp_dev_serial; }
 const char *aacp_get_dev_fw(void)     { return aacp_dev_fw; }
+
+void aacp_reassert_ownership(void) {
+    if (aacp_cid == 0 || !aacp_connected) {
+        printf("[AACP] reassert owns skipped (channel down)\n");
+        return;
+    }
+    uint8_t auto_conn = aacp_auto_conn ? aacp_auto_conn : 0x01;
+    aacp_send_control_cmd(0x06, 0x01, 0x00);
+    aacp_send_control_cmd(0x20, auto_conn, 0x00);
+    aacp_owns = 1;
+    printf("[AACP] reassert owns=1 auto-conn=0x%02x (LibrePods takeOver)\n",
+           (unsigned) auto_conn);
+}
 
 bool aacp_set_noise_mode(uint8_t mode) {
     if (mode < 1 || mode > 4) return false;

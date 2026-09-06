@@ -532,6 +532,7 @@ void tinyusb_control_task(void){
    if (ITF_NUM_AUDIO_STREAMING_SPK == itf && alt == 0) {
        blink_interval_ms = BLINK_MOUNTED;
        spk_stream_reset();
+       avdtp_set_usb_speaker_open(false);
    }
 
    if (ITF_NUM_AUDIO_STREAMING_MIC == itf && alt == 0)
@@ -553,9 +554,15 @@ void tinyusb_control_task(void){
    if (ITF_NUM_AUDIO_STREAMING_SPK == itf && alt != 0)
        blink_interval_ms = BLINK_STREAMING;
 
+   if (ITF_NUM_AUDIO_STREAMING_SPK == itf) {
+       avdtp_set_usb_speaker_open(alt != 0);
+   }
+
    // Mac Apple Music via USB should steal Max 2 back from the iPhone.
+   // Also reclaim if signaling is still up but the stream was stolen
+   // (START rejected / unexpected pause).
    if (ITF_NUM_AUDIO_STREAMING_SPK == itf && alt != 0) {
-       if (!get_a2dp_connected_flag()) {
+       if (!get_a2dp_connected_flag() || !check_is_streaming()) {
            control_request_reconnect();
        }
    }

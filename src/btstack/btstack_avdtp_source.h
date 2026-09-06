@@ -40,6 +40,10 @@ bool get_bt_mute();
 
 void set_usb_streaming(bool flag);
 
+// USB speaker alt ≠ 0. Dual-connect reclaim only fights the iPhone when
+// Mac/Windows is actually using TinyUSB as the output.
+void avdtp_set_usb_speaker_open(bool open);
+
 bool * get_is_bt_sink_volume_changed_ptr();
 
 int btstack_main(int argc, const char * argv[]);

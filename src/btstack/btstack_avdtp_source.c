@@ -52,6 +52,7 @@
 
 #include "btstack_hci.h"
 #include "btstack_aacp.h"
+#include "avdtp_reclaim.h"
 #include "classic/device_id_server.h"
 
 #include "../pico_w_led.h"
@@ -465,6 +466,12 @@ static bool     filling_slot_valid = false;
 static uint16_t slot_frame_int16  = AUDIO_SLOT_MAX_INT16; // set per codec
 
 static bool is_usb_streaming = false;
+static bool usb_spk_open = false;
+
+void avdtp_set_usb_speaker_open(bool open) {
+    usb_spk_open = open;
+}
+
 static bool have_ldac_codec_capabilities = false;
 static bool have_aaceld_codec_capabilities = false;
 bd_addr_t cur_active_device;
@@ -496,44 +503,104 @@ static bool suspend_recovery_pending = false;
 
 // Auto-reclaim after the iPhone (or anyone) drops our AVDTP signaling.
 // Explicit disconnect / pair-scan sets reclaim_hold so we do not fight the user.
-#define RECLAIM_DELAY_MS  400
-#define RECLAIM_RETRY_MS  2000
-#define RECLAIM_MAX_TRIES 30
+// Dual-connect steal: unexpected SUSPEND + START reject, then status 129
+// (0x81) if we reconnect too soon while the phone still holds the sink.
 static btstack_timer_source_t reclaim_timer;
-static bool    reclaim_hold  = false;
-static uint8_t reclaim_tries = 0;
+static bool     reclaim_hold            = false;
+static bool     reclaim_steal           = false;
+static bool     reclaim_connect_pending = false;
+static bool     reclaim_drop_issued     = false;
+static uint8_t  reclaim_tries           = 0;
+static uint32_t reclaim_pending_since_ms = 0;
 
 static void a2dp_demo_timer_start(a2dp_media_sending_context_t * context);
+static void a2dp_demo_timer_stop(a2dp_media_sending_context_t * context);
+static void reclaim_arm(uint32_t delay_ms);
+static void avdtp_reclaim_after_steal(void);
 
 static void reclaim_timer_handler(btstack_timer_source_t *timer) {
     (void)timer;
     if (reclaim_hold || a2dp_is_connected_flag) return;
-    if (reclaim_tries >= RECLAIM_MAX_TRIES) {
+    if (reclaim_connect_pending) {
+        uint32_t now = btstack_run_loop_get_time_ms();
+        if ((int32_t)(now - reclaim_pending_since_ms) < (int32_t) AVDTP_RECLAIM_PENDING_STUCK_MS) {
+            printf("[A2DP] reclaim wait (connect still pending)\n");
+            reclaim_arm(AVDTP_RECLAIM_RETRY_MS);
+            return;
+        }
+        printf("[A2DP] reclaim connect stuck after %u ms, retry\n",
+               (unsigned) AVDTP_RECLAIM_PENDING_STUCK_MS);
+        reclaim_connect_pending = false;
+    }
+    if (reclaim_tries >= AVDTP_RECLAIM_MAX_TRIES) {
         printf("[A2DP] reclaim gave up after %u tries\n", (unsigned) reclaim_tries);
         return;
     }
     reclaim_tries++;
-    printf("[A2DP] reclaim try %u/%u\n", (unsigned) reclaim_tries, RECLAIM_MAX_TRIES);
-    avdtp_source_connect((uint8_t *) get_device_addr(), &media_tracker.avdtp_cid);
-    btstack_run_loop_set_timer(&reclaim_timer, RECLAIM_RETRY_MS);
-    btstack_run_loop_add_timer(&reclaim_timer);
+    printf("[A2DP] reclaim try %u/%u (steal=%u)\n",
+           (unsigned) reclaim_tries, AVDTP_RECLAIM_MAX_TRIES, (unsigned) reclaim_steal);
+    uint8_t st = avdtp_source_connect((uint8_t *) get_device_addr(), &media_tracker.avdtp_cid);
+    if (st != ERROR_CODE_SUCCESS) {
+        printf("[A2DP] reclaim connect returned status %u\n", (unsigned) st);
+        if (st == ERROR_CODE_COMMAND_DISALLOWED) {
+            reclaim_connect_pending = true;
+            reclaim_pending_since_ms = btstack_run_loop_get_time_ms();
+            reclaim_arm(AVDTP_RECLAIM_RETRY_MS);
+            return;
+        }
+        reclaim_arm(avdtp_reclaim_backoff_ms(st, reclaim_tries));
+        return;
+    }
+    reclaim_connect_pending = true;
+    reclaim_pending_since_ms = btstack_run_loop_get_time_ms();
+    // Next try waits for SIGNALING_CONNECTION_ESTABLISHED (ok or status 129).
 }
 
 void avdtp_reclaim_hold_set(bool hold) {
     reclaim_hold = hold;
     if (hold) {
         reclaim_tries = 0;
+        reclaim_steal = false;
+        reclaim_connect_pending = false;
+        reclaim_drop_issued = false;
         btstack_run_loop_remove_timer(&reclaim_timer);
     }
 }
 
-static void reclaim_arm_after_release(void) {
+static void reclaim_arm(uint32_t delay_ms) {
     if (reclaim_hold) return;
-    reclaim_tries = 0;
     btstack_run_loop_remove_timer(&reclaim_timer);
     btstack_run_loop_set_timer_handler(&reclaim_timer, reclaim_timer_handler);
-    btstack_run_loop_set_timer(&reclaim_timer, RECLAIM_DELAY_MS);
+    btstack_run_loop_set_timer(&reclaim_timer, delay_ms);
     btstack_run_loop_add_timer(&reclaim_timer);
+}
+
+static void reclaim_arm_after_release(void) {
+    if (reclaim_hold) return;
+    reclaim_connect_pending = false;
+    reclaim_tries = 0;
+    uint32_t d = avdtp_reclaim_arm_delay_ms(reclaim_steal);
+    printf("[A2DP] reclaim armed in %u ms (steal=%u)\n",
+           (unsigned) d, (unsigned) reclaim_steal);
+    reclaim_arm(d);
+}
+
+static void avdtp_reclaim_after_steal(void) {
+    if (reclaim_hold) return;
+    if (reclaim_drop_issued) return;
+    reclaim_steal = true;
+    aacp_reassert_ownership();
+    a2dp_demo_timer_stop(&media_tracker);
+    is_streaming = false;
+    if (a2dp_is_connected_flag) {
+        reclaim_drop_issued = true;
+        printf("[A2DP] steal: drop signaling so reclaim can reconnect\n");
+        avdtp_source_disconnect(media_tracker.avdtp_cid);
+        return;
+    }
+    reclaim_tries = 0;
+    printf("[A2DP] steal: reclaim in %u ms\n", (unsigned) AVDTP_RECLAIM_STEAL_DELAY_MS);
+    reclaim_arm(AVDTP_RECLAIM_STEAL_DELAY_MS);
 }
 
 static void suspend_recovery_handler(btstack_timer_source_t *timer) {
@@ -1249,6 +1316,17 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
             status = avdtp_subevent_signaling_connection_established_get_status(packet);
             if (status != 0){
                 printf("AVDTP source signaling connection failed: status %d\n", status);
+                reclaim_connect_pending = false;
+                a2dp_is_connected_flag = false;
+                if (!reclaim_hold) {
+                    if (status == (uint8_t) AVDTP_RECLAIM_STATUS_RESOURCE) {
+                        reclaim_steal = true;
+                    }
+                    uint32_t d = avdtp_reclaim_backoff_ms(status, reclaim_tries);
+                    printf("[A2DP] reclaim backoff %u ms after status %u (steal=%u)\n",
+                           (unsigned) d, (unsigned) status, (unsigned) reclaim_steal);
+                    reclaim_arm(d);
+                }
                 break;
             }
             media_tracker.avdtp_cid = avdtp_subevent_signaling_connection_established_get_avdtp_cid(packet);
@@ -1265,6 +1343,9 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
             status = avdtp_source_discover_stream_endpoints(media_tracker.avdtp_cid);
             a2dp_is_connected_flag = true;
             reclaim_tries = 0;
+            reclaim_steal = false;
+            reclaim_connect_pending = false;
+            reclaim_drop_issued = false;
             btstack_run_loop_remove_timer(&reclaim_timer);
 
             // Open the AACP channel (PSM 0x1001) to the same AirPods once
@@ -1827,16 +1908,27 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
                         start_led_blink();
                     }
                     break;
-                case AVDTP_SI_SUSPEND:
+                case AVDTP_SI_SUSPEND: {
                     printf("Stream paused.\n");
                     // Cancel recovery timer — suspend response arrived
+                    bool local_recovery = suspend_recovery_pending;
                     suspend_recovery_pending = false;
                     btstack_run_loop_remove_timer(&suspend_recovery_timer);
                     a2dp_demo_timer_pause(&media_tracker);
-                    // Auto-restart: ask to resume so AirPods reset their decoder
-                    printf("Auto-restarting stream...\n");
-                    avdtp_source_start_stream(media_tracker.avdtp_cid, media_tracker.local_seid);
+                    if (local_recovery) {
+                        // Our send-fail recovery: resume so AirPods reset their decoder.
+                        printf("Auto-restarting stream (local recovery)...\n");
+                        avdtp_source_start_stream(media_tracker.avdtp_cid, media_tracker.local_seid);
+                    } else if (usb_spk_open || is_usb_streaming) {
+                        // Unexpected pause while TinyUSB is the output: iPhone steal.
+                        // Immediate START is rejected and then reclaim hits status 129.
+                        printf("[A2DP] unexpected pause (dual-connect steal?) — reclaim\n");
+                        avdtp_reclaim_after_steal();
+                    } else {
+                        printf("[A2DP] unexpected pause, USB speaker idle — leave paused\n");
+                    }
                     break;
+                }
                 case AVDTP_SI_ABORT:
                 case AVDTP_SI_CLOSE:
                     printf("Stream released.\n");
@@ -1850,14 +1942,22 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
         case AVDTP_SUBEVENT_SIGNALING_REJECT:
             signal_identifier = avdtp_subevent_signaling_reject_get_signal_identifier(packet);
             printf("Rejected %s\n", avdtp_si2str(signal_identifier));
-            // If suspend or start was rejected during recovery, restart timer
             if (signal_identifier == AVDTP_SI_SUSPEND || signal_identifier == AVDTP_SI_START) {
                 suspend_recovery_pending = false;
                 btstack_run_loop_remove_timer(&suspend_recovery_timer);
-                if (a2dp_is_connected_flag) {
-                    printf("Restarting audio timer after reject\n");
-                    a2dp_demo_timer_start(&media_tracker);
+            }
+            if (signal_identifier == AVDTP_SI_START) {
+                if (usb_spk_open || is_usb_streaming) {
+                    printf("[A2DP] START rejected (dual-connect steal?) — reclaim\n");
+                    avdtp_reclaim_after_steal();
+                } else {
+                    printf("[A2DP] START rejected, USB speaker idle — leave it\n");
                 }
+                break;
+            }
+            if (signal_identifier == AVDTP_SI_SUSPEND && a2dp_is_connected_flag) {
+                printf("Restarting audio timer after suspend reject\n");
+                a2dp_demo_timer_start(&media_tracker);
             }
             break;
         case AVDTP_SUBEVENT_SIGNALING_GENERAL_REJECT:
@@ -1866,10 +1966,19 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
             if (signal_identifier == AVDTP_SI_SUSPEND || signal_identifier == AVDTP_SI_START) {
                 suspend_recovery_pending = false;
                 btstack_run_loop_remove_timer(&suspend_recovery_timer);
-                if (a2dp_is_connected_flag) {
-                    printf("Restarting audio timer after general reject\n");
-                    a2dp_demo_timer_start(&media_tracker);
+            }
+            if (signal_identifier == AVDTP_SI_START) {
+                if (usb_spk_open || is_usb_streaming) {
+                    printf("[A2DP] START general-reject (dual-connect steal?) — reclaim\n");
+                    avdtp_reclaim_after_steal();
+                } else {
+                    printf("[A2DP] START general-reject, USB speaker idle — leave it\n");
                 }
+                break;
+            }
+            if (signal_identifier == AVDTP_SI_SUSPEND && a2dp_is_connected_flag) {
+                printf("Restarting audio timer after general suspend reject\n");
+                a2dp_demo_timer_start(&media_tracker);
             }
             break;
         case AVDTP_SUBEVENT_STREAMING_CONNECTION_RELEASED:
@@ -1877,6 +1986,11 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
             printf("Streaming connection released.\n");
             set_led_mode_off();
             is_streaming = false;
+            if (!reclaim_hold && a2dp_is_connected_flag &&
+                (usb_spk_open || is_usb_streaming)) {
+                printf("[A2DP] streaming released while USB speaker open — steal reclaim\n");
+                avdtp_reclaim_after_steal();
+            }
             break;
         case AVDTP_SUBEVENT_SIGNALING_CONNECTION_RELEASED:
             a2dp_demo_timer_stop(&media_tracker);
@@ -1889,6 +2003,7 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
             finish_setup_aac = false;
             aacp_disconnect();
             printf("Signaling connection released.\n");
+            reclaim_drop_issued = false;
             reclaim_arm_after_release();
             break;
         default:
@@ -2451,7 +2566,28 @@ void avdtp_disconnect_and_scan(){
 
 void a2dp_source_reconnect(){
     avdtp_reclaim_hold_set(false);
-    avdtp_source_connect((uint8_t *) get_device_addr(), &media_tracker.avdtp_cid);
+    if (a2dp_is_connected_flag && is_streaming) {
+        return;
+    }
+    if (a2dp_is_connected_flag) {
+        printf("[A2DP] USB wants sink; signaling up but not streaming — steal reclaim\n");
+        avdtp_reclaim_after_steal();
+        return;
+    }
+    if (reclaim_connect_pending) {
+        printf("[A2DP] reconnect ignored, connect already pending\n");
+        return;
+    }
+    printf("[A2DP] USB reconnect to %s\n", get_device_addr_string());
+    uint8_t st = avdtp_source_connect((uint8_t *) get_device_addr(), &media_tracker.avdtp_cid);
+    if (st != ERROR_CODE_SUCCESS) {
+        printf("[A2DP] reconnect connect status %u — arm reclaim\n", (unsigned) st);
+        reclaim_steal = true;
+        reclaim_arm_after_release();
+        return;
+    }
+    reclaim_connect_pending = true;
+    reclaim_pending_since_ms = btstack_run_loop_get_time_ms();
 }
 
 

@@ -1,4 +1,4 @@
-// Host-side proof of Max ear-off: pause when EITHER cup is not on-head.
+// Host-side proof of Max ear-off Pause and bounce-safe resume.
 // gcc -I. -O2 -o /tmp/aacp_ear_test tests/aacp_ear_test.c && /tmp/aacp_ear_test
 
 #include <stdio.h>
@@ -33,6 +33,25 @@ int main(void) {
     EQ(old_off, 0, "old BOTH-out misses L=1 R=0");
     EQ(new_off, 1, "new either-out catches L=1 R=0");
 
-    printf("aacp_ear_test: PASS (either-cup-out is off-head; L=1 R=0 pauses)\n");
+    // Pause stays snappy; Play after we paused waits for stable both-on-head.
+    EQ(aacp_ear_commit_delay_ms(true, false), AACP_EAR_OFF_DEBOUNCE_MS, "off no resume");
+    EQ(aacp_ear_commit_delay_ms(true, true), AACP_EAR_OFF_DEBOUNCE_MS, "off with resume");
+    EQ(aacp_ear_commit_delay_ms(false, false), AACP_EAR_OFF_DEBOUNCE_MS, "on no resume");
+    EQ(aacp_ear_commit_delay_ms(false, true), AACP_EAR_RESUME_STABLE_MS, "on after Pause");
+    if (AACP_EAR_RESUME_STABLE_MS < 1000 || AACP_EAR_RESUME_STABLE_MS > 2000) {
+        fprintf(stderr, "FAIL: resume stable ms should be 1–2 s, got %u\n",
+                (unsigned) AACP_EAR_RESUME_STABLE_MS);
+        return 1;
+    }
+
+    // Live bounce 2026-09-05: Pause, then L=0 R=1 (still off), then L=0 R=0.
+    // 200 ms on-head delay would HID Play; 1500 ms does not on a short flap.
+    EQ(aacp_ear_is_off_head(0x00, 0x01), 1, "bounce L=0 R=1 still off-head");
+    EQ(aacp_ear_is_off_head(0x00, 0x00), 0, "bounce L=0 R=0 looks on-head");
+    uint32_t bounce_play_delay = aacp_ear_commit_delay_ms(false, true);
+    EQ(bounce_play_delay > AACP_EAR_OFF_DEBOUNCE_MS, 1, "resume delay longer than Pause debounce");
+
+    printf("aacp_ear_test: PASS (either-cup-out pauses; resume waits %u ms stable on-head)\n",
+           (unsigned) AACP_EAR_RESUME_STABLE_MS);
     return 0;
 }
