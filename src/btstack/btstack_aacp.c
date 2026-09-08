@@ -25,6 +25,7 @@
 #include "btstack.h"
 #include "btstack_aacp.h"
 #include "dual_connect_policy.h"
+#include "aacp_smart_routing.h"
 #include "btstack_avdtp_source.h"
 #include "aacp_ear.h"
 #include "aacp_mic_dec.h"
@@ -87,7 +88,7 @@ static const uint8_t aacp_mic_stop_bytes[] = {
 // --- TX queue (ordered; one packet sent per CAN_SEND_NOW event) ---
 // Packets are copied so callers can reuse stack/static templates.
 typedef struct {
-    uint8_t  data[64];
+    uint8_t  data[160]; /* 0x10 media_info is 144 */
     uint16_t len;
 } aacp_pkt_t;
 
@@ -146,6 +147,12 @@ static uint8_t aacp_last19_type = 0;
 static uint8_t aacp_last19_bud  = 0;
 static uint32_t aacp_imu_last_log_ms = 0;
 
+/* 0x2E connected-devices cache (LibrePods connectedDevices / oldConnectedDevices). */
+static dual_connected_device_t aacp_conn_devs[DUAL_CONN_DEV_MAX];
+static int aacp_conn_dev_count = 0;
+static dual_connected_device_t aacp_conn_devs_old[DUAL_CONN_DEV_MAX];
+static int aacp_conn_dev_count_old = 0;
+
 // Auto-pause: AAP Definitions 0x00=InEar (ON HEAD), 0x01=Out, 0x02=InCase.
 // Max 2 0x00/0x00 while worn is ON. Debounce: 200 ms off-head, 1500 ms
 // on-head after we paused (Max sensor bounce L=0 R=0 after take-off).
@@ -179,6 +186,8 @@ static void aacp_status_reset(void) {
     aacp_last19_type = 0;
     aacp_last19_bud = 0;
     aacp_dev_name[0] = aacp_dev_model[0] = aacp_dev_serial[0] = aacp_dev_fw[0] = 0;
+    aacp_conn_dev_count = 0;
+    aacp_conn_dev_count_old = 0;
     btstack_run_loop_remove_timer(&aacp_ear_timer);
 }
 
@@ -708,6 +717,10 @@ static void aacp_handle_stem(uint8_t type, uint8_t bud) {
     printf("[AACP] stem type=0x%02X bud=0x%02X\n", type, bud);
 }
 
+static void aacp_get_self_mac(uint8_t out[6]);
+static void aacp_send_smart_routing_hijack(bool streaming);
+static void aacp_send_new_tipi_for_peer(const uint8_t peer_mac[6]);
+
 static void aacp_handle_control(const uint8_t *pkt, uint16_t size) {
     uint16_t opcode = little_endian_read_16(pkt, 4);
     const uint8_t *p = pkt + 6;
@@ -847,9 +860,8 @@ static void aacp_handle_control(const uint8_t *pkt, uint16_t size) {
     }
 
     if (opcode == 0x000D || opcode == 0x000E || opcode == 0x0010 || opcode == 0x0011) {
-        // Audio source / smart routing. LibrePods hijack uses MAC-specific
-        // blobs (sendMediaInformation + sendHijackRequest). Do not invent a reply.
-        // Parse 0x0E (MAC reversed + type) for dual-connect policy only.
+        // Audio source / smart routing RX. TX hijack is LibrePods AACPManager
+        // builders on reclaim (aacp_reassert_ownership). Parse 0x0E only here.
         if (opcode == 0x000E) {
             dual_audio_source_t src;
             if (dual_connect_parse_0e(pkt, size, &src)) {
@@ -876,13 +888,35 @@ static void aacp_handle_control(const uint8_t *pkt, uint16_t size) {
             dual_connected_device_t devs[DUAL_CONN_DEV_MAX];
             int n = dual_connect_parse_0x2e(pkt, size, devs, DUAL_CONN_DEV_MAX);
             if (n >= 0) {
+                /* LibrePods: oldConnectedDevices = connectedDevices before update */
+                memcpy(aacp_conn_devs_old, aacp_conn_devs,
+                       sizeof(aacp_conn_devs_old));
+                aacp_conn_dev_count_old = aacp_conn_dev_count;
+                memset(aacp_conn_devs, 0, sizeof(aacp_conn_devs));
+                if (n > DUAL_CONN_DEV_MAX) n = DUAL_CONN_DEV_MAX;
+                memcpy(aacp_conn_devs, devs, (size_t)n * sizeof(devs[0]));
+                aacp_conn_dev_count = n;
                 printf("[AACP] 0x2E connected-devices count=%d\n", n);
+                uint8_t self_mac[6];
+                aacp_get_self_mac(self_mac);
                 for (int i = 0; i < n; i++) {
                     printf("[AACP] 0x2E[%d] %02X:%02X:%02X:%02X:%02X:%02X info=%02X %02X\n",
                            i,
                            devs[i].mac[0], devs[i].mac[1], devs[i].mac[2],
                            devs[i].mac[3], devs[i].mac[4], devs[i].mac[5],
                            devs[i].info1, devs[i].info2);
+                    /* New peer ≠ self → media_new + addTiPi (LibrePods). */
+                    if (memcmp(devs[i].mac, self_mac, 6) == 0) continue;
+                    bool seen = false;
+                    for (int j = 0; j < aacp_conn_dev_count_old; j++) {
+                        if (memcmp(aacp_conn_devs_old[j].mac, devs[i].mac, 6) == 0) {
+                            seen = true;
+                            break;
+                        }
+                    }
+                    if (!seen) {
+                        aacp_send_new_tipi_for_peer(devs[i].mac);
+                    }
                 }
             }
         }
@@ -947,6 +981,61 @@ const char *aacp_get_dev_model(void)  { return aacp_dev_model; }
 const char *aacp_get_dev_serial(void) { return aacp_dev_serial; }
 const char *aacp_get_dev_fw(void)     { return aacp_dev_fw; }
 
+
+static void aacp_get_self_mac(uint8_t out[6]) {
+    bd_addr_t local;
+    gap_local_bd_addr(local);
+    memcpy(out, local, 6);
+}
+
+/* LibrePods takeOver order after OWNS: media_info + showUI + hijack to each
+ * 0x2E peer ≠ self. Only when USB wants sink and anti-ping-pong is clear. */
+static void aacp_send_smart_routing_hijack(bool streaming) {
+    if (!aacp_sr_should_send_hijack(avdtp_usb_speaker_is_open(),
+                                    avdtp_usb_is_streaming(),
+                                    avdtp_we_paused_after_giveup())) {
+        printf("[AACP] 0x10 hijack skipped (USB_IDLE or anti-ping-pong)\n");
+        return;
+    }
+    uint8_t self_mac[6];
+    aacp_get_self_mac(self_mac);
+    int sent = 0;
+    for (int i = 0; i < aacp_conn_dev_count; i++) {
+        if (memcmp(aacp_conn_devs[i].mac, self_mac, 6) == 0) continue;
+        const uint8_t *peer = aacp_conn_devs[i].mac;
+        uint8_t media[AACP_SR_MEDIA_LEN];
+        uint8_t show[AACP_SR_SHOWUI_LEN];
+        uint8_t hij[AACP_SR_HIJACK_LEN];
+        aacp_sr_build_media_info(media, self_mac, peer, streaming);
+        aacp_sr_build_show_ui(show, peer);
+        aacp_sr_build_hijack(hij, peer);
+        aacp_tx_enqueue(media, AACP_SR_MEDIA_LEN);
+        aacp_tx_enqueue(show, AACP_SR_SHOWUI_LEN);
+        aacp_tx_enqueue(hij, AACP_SR_HIJACK_LEN);
+        sent++;
+        printf("[AACP] 0x10 takeOver → %02X:%02X:%02X:%02X:%02X:%02X (media+showUI+hijack)\n",
+               peer[0], peer[1], peer[2], peer[3], peer[4], peer[5]);
+    }
+    if (sent == 0) {
+        printf("[AACP] 0x10 hijack: no 0x2E peer ≠ self yet\n");
+    }
+}
+
+static void aacp_send_new_tipi_for_peer(const uint8_t peer_mac[6]) {
+    uint8_t self_mac[6];
+    aacp_get_self_mac(self_mac);
+    if (memcmp(peer_mac, self_mac, 6) == 0) return;
+    uint8_t media_new[AACP_SR_MEDIA_NEW_LEN];
+    uint8_t add_tipi[AACP_SR_ADD_TIPI_LEN];
+    aacp_sr_build_media_new_device(media_new, self_mac, peer_mac);
+    aacp_sr_build_add_tipi(add_tipi, self_mac, peer_mac);
+    aacp_tx_enqueue(media_new, AACP_SR_MEDIA_NEW_LEN);
+    aacp_tx_enqueue(add_tipi, AACP_SR_ADD_TIPI_LEN);
+    printf("[AACP] 0x10 newTipi → %02X:%02X:%02X:%02X:%02X:%02X\n",
+           peer_mac[0], peer_mac[1], peer_mac[2],
+           peer_mac[3], peer_mac[4], peer_mac[5]);
+}
+
 void aacp_reassert_ownership(void) {
     if (aacp_cid == 0 || !aacp_connected) {
         printf("[AACP] reassert owns skipped (channel down)\n");
@@ -963,6 +1052,9 @@ void aacp_reassert_ownership(void) {
     aacp_owns = 1;
     printf("[AACP] reassert owns=1 auto-conn=0x%02x (LibrePods takeOver)\n",
            (unsigned) auto_conn);
+    /* After OWNS claim: media_info + showUI + hijack (LibrePods takeOver order).
+     * Gated: USB open/streaming only; anti-ping-pong still applies. */
+    aacp_send_smart_routing_hijack(check_is_streaming() || avdtp_usb_is_streaming());
 }
 
 bool aacp_set_noise_mode(uint8_t mode) {

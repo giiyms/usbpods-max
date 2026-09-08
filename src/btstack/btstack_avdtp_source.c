@@ -481,6 +481,18 @@ void avdtp_set_usb_speaker_open(bool open) {
     usb_spk_open = open;
 }
 
+bool avdtp_usb_speaker_is_open(void) {
+    return usb_spk_open;
+}
+
+bool avdtp_usb_is_streaming(void) {
+    return is_usb_streaming;
+}
+
+bool avdtp_we_paused_after_giveup(void) {
+    return we_paused_after_giveup;
+}
+
 static bool have_ldac_codec_capabilities = false;
 static bool have_aaceld_codec_capabilities = false;
 bd_addr_t cur_active_device;

@@ -44,6 +44,11 @@ void set_usb_streaming(bool flag);
 // Mac/Windows is actually using TinyUSB as the output.
 void avdtp_set_usb_speaker_open(bool open);
 
+// Dual-connect / 0x10 hijack gates (read-only snapshots of USB sink state).
+bool avdtp_usb_speaker_is_open(void);
+bool avdtp_usb_is_streaming(void);
+bool avdtp_we_paused_after_giveup(void);
+
 bool * get_is_bt_sink_volume_changed_ptr();
 
 int btstack_main(int argc, const char * argv[]);
