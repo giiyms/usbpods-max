@@ -24,6 +24,8 @@
 
 #include "btstack.h"
 #include "btstack_aacp.h"
+#include "dual_connect_policy.h"
+#include "btstack_avdtp_source.h"
 #include "aacp_ear.h"
 #include "aacp_mic_dec.h"
 #include "../hid_consumer.h"
@@ -736,7 +738,15 @@ static void aacp_handle_control(const uint8_t *pkt, uint16_t size) {
         uint8_t v  = p[1];
         uint8_t v2 = (n >= 3) ? p[2] : 0;
         switch (id) {
-            case 0x06: aacp_owns = v; break;
+            case 0x06: {
+                uint8_t prev = aacp_owns;
+                aacp_owns = v;
+                /* Lost ownership after we claimed — peer playing. */
+                if (prev == DUAL_OWNS_CLAIM_VAL && v == DUAL_OWNS_GIVEUP_VAL) {
+                    avdtp_dual_connect_note_they_own();
+                }
+                break;
+            }
             case 0x0A: aacp_ear_en = v; break;
             case 0x0D:
                 if (v >= 1 && v <= 4 && v != aacp_noise_mode) {
@@ -839,6 +849,18 @@ static void aacp_handle_control(const uint8_t *pkt, uint16_t size) {
     if (opcode == 0x000D || opcode == 0x000E || opcode == 0x0010 || opcode == 0x0011) {
         // Audio source / smart routing. LibrePods hijack uses MAC-specific
         // blobs (sendMediaInformation + sendHijackRequest). Do not invent a reply.
+        // Parse 0x0E (MAC reversed + type) for dual-connect policy only.
+        if (opcode == 0x000E) {
+            dual_audio_source_t src;
+            if (dual_connect_parse_0e(pkt, size, &src)) {
+                printf("[AACP] 0x0E audio-src MAC %02X:%02X:%02X:%02X:%02X:%02X type=%u\n",
+                       src.mac[0], src.mac[1], src.mac[2],
+                       src.mac[3], src.mac[4], src.mac[5],
+                       (unsigned) src.type);
+                /* Give-up uses owns=00 / reclaim stop; need local MAC to
+                 * compare before acting on 0x0E (no invented hijack). */
+            }
+        }
         aacp_dump_hex(opcode == 0x000D ? "0x000D audio-src-req" :
                       opcode == 0x000E ? "0x000E audio-src-resp" :
                       opcode == 0x0010 ? "0x0010 smart-routing" :
@@ -849,7 +871,21 @@ static void aacp_handle_control(const uint8_t *pkt, uint16_t size) {
 
     if (opcode == 0x002D || opcode == 0x002E) {
         // LibrePods opcodes.md: 0x2D req / 0x2E list of connected devices.
-        // Live dual-connect steal shows the iPhone MAC here. Dump only.
+        // Live dual-connect steal shows the iPhone MAC here. Parse + dump.
+        if (opcode == 0x002E) {
+            dual_connected_device_t devs[DUAL_CONN_DEV_MAX];
+            int n = dual_connect_parse_0x2e(pkt, size, devs, DUAL_CONN_DEV_MAX);
+            if (n >= 0) {
+                printf("[AACP] 0x2E connected-devices count=%d\n", n);
+                for (int i = 0; i < n; i++) {
+                    printf("[AACP] 0x2E[%d] %02X:%02X:%02X:%02X:%02X:%02X info=%02X %02X\n",
+                           i,
+                           devs[i].mac[0], devs[i].mac[1], devs[i].mac[2],
+                           devs[i].mac[3], devs[i].mac[4], devs[i].mac[5],
+                           devs[i].info1, devs[i].info2);
+                }
+            }
+        }
         aacp_dump_hex(opcode == 0x002E ? "0x002E connected-devices" :
                                          "0x002D connected-dev-req",
                       pkt, size);
@@ -916,9 +952,14 @@ void aacp_reassert_ownership(void) {
         printf("[AACP] reassert owns skipped (channel down)\n");
         return;
     }
-    uint8_t auto_conn = aacp_auto_conn ? aacp_auto_conn : 0x01;
-    aacp_send_control_cmd(0x06, 0x01, 0x00);
-    aacp_send_control_cmd(0x20, auto_conn, 0x00);
+    uint8_t auto_conn = aacp_auto_conn ? aacp_auto_conn : DUAL_AUTOCON_ON;
+    uint8_t owns_pkt[DUAL_CTRL_FRAME_LEN];
+    uint8_t ac_pkt[DUAL_CTRL_FRAME_LEN];
+    dual_connect_build_owns_claim(owns_pkt);
+    dual_connect_build_autocon(ac_pkt, auto_conn);
+    /* Same bytes as aacp_send_control_cmd(0x06/0x20); builders are the golden. */
+    aacp_tx_enqueue(owns_pkt, DUAL_CTRL_FRAME_LEN);
+    aacp_tx_enqueue(ac_pkt, DUAL_CTRL_FRAME_LEN);
     aacp_owns = 1;
     printf("[AACP] reassert owns=1 auto-conn=0x%02x (LibrePods takeOver)\n",
            (unsigned) auto_conn);

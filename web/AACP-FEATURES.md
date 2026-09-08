@@ -61,7 +61,16 @@ Handshake replay runs after handshake + `0x004D` + `0x000F` on **every new AACP 
 
 ## Dual-connect hunch (protocol side)
 
-iPhone can keep the AACP/HFP session so crown volume hits the phone. Firmware always claims **`0x06` own** and LibrePods **`0x20=0x01`** on every AACP session, and **re-sends `0x06`/`0x20` (LibrePods takeOver)** when A2DP is stolen. Dual-connect may still need the user to set iPhone “Connect only When Last Connected”. Hijack `0x0E` blobs are not invented.
+iPhone can keep the AACP/HFP session so crown volume hits the phone. Firmware always claims **`0x06` own** and LibrePods **`0x20=0x01`** on every AACP session, and **re-sends `0x06`/`0x20` (LibrePods takeOver)** when A2DP is stolen. Dual-connect may still need the user to set iPhone “Connect only When Last Connected”. Hijack `0x0E` / `0x10` blobs are not invented.
+
+Host-side policy (`src/btstack/dual_connect_policy.h`, tests in `tests/dual_connect_policy_test.c`):
+
+- States: USB_IDLE / WE_OWN_STREAMING / THEY_OWN / RECLAIMING / GIVE_UP.
+- Reclaim on unexpected pause / START reject only when USB wants the sink.
+- OWNS claim/give-up exact frames; parse `0x0E` (MAC reversed + type) and `0x2E` (count + 8-byte records) per LibrePods `AACPManager`.
+- Anti-ping-pong ([librepods#724](https://github.com/librepods-org/librepods/pull/724)): after give-up (`owns=00` / peer playing), auto-resume must not reclaim until explicit USB speaker open.
+- Post-reclaim Play gated on `we_paused_for_steal`. Stop reclaim if OWNS stays `00`.
+- **Deferred:** `0x10` smart-routing hijack builders (MAC-specific LibrePods blobs only).
 
 ## HID
 

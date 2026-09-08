@@ -53,6 +53,7 @@
 #include "btstack_hci.h"
 #include "btstack_aacp.h"
 #include "avdtp_reclaim.h"
+#include "dual_connect_policy.h"
 #include "classic/device_id_server.h"
 
 #include "../pico_w_led.h"
@@ -467,8 +468,16 @@ static uint16_t slot_frame_int16  = AUDIO_SLOT_MAX_INT16; // set per codec
 
 static bool is_usb_streaming = false;
 static bool usb_spk_open = false;
+/* LibrePods #724 anti-ping-pong / post-reclaim Play gate. */
+static bool we_paused_after_giveup = false;
+static bool we_paused_for_steal    = false;
 
 void avdtp_set_usb_speaker_open(bool open) {
+    /* Explicit USB speaker alt!=0 clears give-up hold so a real user sink
+     * request can reclaim again (not an auto-resume ping-pong). */
+    if (open && !usb_spk_open) {
+        we_paused_after_giveup = false;
+    }
     usb_spk_open = open;
 }
 
@@ -521,6 +530,18 @@ static void avdtp_reclaim_after_steal(void);
 static void reclaim_timer_handler(btstack_timer_source_t *timer) {
     (void)timer;
     if (reclaim_hold || a2dp_is_connected_flag) return;
+    /* Stop if OWNS stayed 00 — peer still playing (earbuds arbitrating). */
+    if (reclaim_steal && aacp_is_connected() &&
+        dual_connect_should_stop_reclaim(true, aacp_get_owns())) {
+        printf("[A2DP] reclaim stop: owns=00 peer playing (give up)\n");
+        reclaim_steal = false;
+        reclaim_tries = 0;
+        reclaim_connect_pending = false;
+        we_paused_after_giveup = true;
+        we_paused_for_steal = false;
+        btstack_run_loop_remove_timer(&reclaim_timer);
+        return;
+    }
     if (reclaim_connect_pending) {
         uint32_t now = btstack_run_loop_get_time_ms();
         if ((int32_t)(now - reclaim_pending_since_ms) < (int32_t) AVDTP_RECLAIM_PENDING_STUCK_MS) {
@@ -556,6 +577,25 @@ static void reclaim_timer_handler(btstack_timer_source_t *timer) {
     // Next try waits for SIGNALING_CONNECTION_ESTABLISHED (ok or status 129).
 }
 
+void avdtp_dual_connect_note_they_own(void) {
+    printf("[A2DP] peer owns stream — give up reclaim (anti-ping-pong)\n");
+    reclaim_steal = false;
+    reclaim_tries = 0;
+    reclaim_connect_pending = false;
+    reclaim_drop_issued = false;
+    we_paused_after_giveup = true;
+    we_paused_for_steal = false;
+    btstack_run_loop_remove_timer(&reclaim_timer);
+}
+
+bool avdtp_allow_play_after_reclaim(void) {
+    bool ok = dual_connect_allow_play_after_reclaim(we_paused_for_steal);
+    if (ok) {
+        we_paused_for_steal = false; /* consume once */
+    }
+    return ok;
+}
+
 void avdtp_reclaim_hold_set(bool hold) {
     reclaim_hold = hold;
     if (hold) {
@@ -563,6 +603,7 @@ void avdtp_reclaim_hold_set(bool hold) {
         reclaim_steal = false;
         reclaim_connect_pending = false;
         reclaim_drop_issued = false;
+        we_paused_for_steal = false;
         btstack_run_loop_remove_timer(&reclaim_timer);
     }
 }
@@ -588,7 +629,12 @@ static void reclaim_arm_after_release(void) {
 static void avdtp_reclaim_after_steal(void) {
     if (reclaim_hold) return;
     if (reclaim_drop_issued) return;
+    if (we_paused_after_giveup) {
+        printf("[A2DP] steal reclaim skipped (anti-ping-pong after give-up)\n");
+        return;
+    }
     reclaim_steal = true;
+    we_paused_for_steal = true;
     aacp_reassert_ownership();
     a2dp_demo_timer_stop(&media_tracker);
     is_streaming = false;
@@ -1346,6 +1392,7 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
             reclaim_steal = false;
             reclaim_connect_pending = false;
             reclaim_drop_issued = false;
+            /* Keep we_paused_for_steal until Play gate is consumed by caller. */
             btstack_run_loop_remove_timer(&reclaim_timer);
 
             // Open the AACP channel (PSM 0x1001) to the same AirPods once
@@ -1919,13 +1966,14 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
                         // Our send-fail recovery: resume so AirPods reset their decoder.
                         printf("Auto-restarting stream (local recovery)...\n");
                         avdtp_source_start_stream(media_tracker.avdtp_cid, media_tracker.local_seid);
-                    } else if (usb_spk_open || is_usb_streaming) {
+                    } else if (dual_connect_should_reclaim_on_steal(
+                                   usb_spk_open, is_usb_streaming, we_paused_after_giveup)) {
                         // Unexpected pause while TinyUSB is the output: iPhone steal.
                         // Immediate START is rejected and then reclaim hits status 129.
                         printf("[A2DP] unexpected pause (dual-connect steal?) — reclaim\n");
                         avdtp_reclaim_after_steal();
                     } else {
-                        printf("[A2DP] unexpected pause, USB speaker idle — leave paused\n");
+                        printf("[A2DP] unexpected pause, USB speaker idle / give-up — leave paused\n");
                     }
                     break;
                 }
@@ -1947,11 +1995,12 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
                 btstack_run_loop_remove_timer(&suspend_recovery_timer);
             }
             if (signal_identifier == AVDTP_SI_START) {
-                if (usb_spk_open || is_usb_streaming) {
+                if (dual_connect_should_reclaim_on_steal(
+                        usb_spk_open, is_usb_streaming, we_paused_after_giveup)) {
                     printf("[A2DP] START rejected (dual-connect steal?) — reclaim\n");
                     avdtp_reclaim_after_steal();
                 } else {
-                    printf("[A2DP] START rejected, USB speaker idle — leave it\n");
+                    printf("[A2DP] START rejected, USB speaker idle / give-up — leave it\n");
                 }
                 break;
             }
@@ -1968,11 +2017,12 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
                 btstack_run_loop_remove_timer(&suspend_recovery_timer);
             }
             if (signal_identifier == AVDTP_SI_START) {
-                if (usb_spk_open || is_usb_streaming) {
+                if (dual_connect_should_reclaim_on_steal(
+                        usb_spk_open, is_usb_streaming, we_paused_after_giveup)) {
                     printf("[A2DP] START general-reject (dual-connect steal?) — reclaim\n");
                     avdtp_reclaim_after_steal();
                 } else {
-                    printf("[A2DP] START general-reject, USB speaker idle — leave it\n");
+                    printf("[A2DP] START general-reject, USB speaker idle / give-up — leave it\n");
                 }
                 break;
             }
@@ -1987,7 +2037,8 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
             set_led_mode_off();
             is_streaming = false;
             if (!reclaim_hold && a2dp_is_connected_flag &&
-                (usb_spk_open || is_usb_streaming)) {
+                dual_connect_should_reclaim_on_steal(
+                    usb_spk_open, is_usb_streaming, we_paused_after_giveup)) {
                 printf("[A2DP] streaming released while USB speaker open — steal reclaim\n");
                 avdtp_reclaim_after_steal();
             }
