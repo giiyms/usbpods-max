@@ -48,6 +48,7 @@ void avdtp_set_usb_speaker_open(bool open);
 bool avdtp_usb_speaker_is_open(void);
 bool avdtp_usb_is_streaming(void);
 bool avdtp_we_paused_after_giveup(void);
+bool avdtp_reclaim_steal_active(void);
 
 bool * get_is_bt_sink_volume_changed_ptr();
 

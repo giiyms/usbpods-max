@@ -536,6 +536,10 @@ static bool     reclaim_drop_issued     = false;
 static uint8_t  reclaim_tries           = 0;
 static uint32_t reclaim_pending_since_ms = 0;
 
+bool avdtp_reclaim_steal_active(void) {
+    return reclaim_steal;
+}
+
 static void a2dp_demo_timer_start(a2dp_media_sending_context_t * context);
 static void a2dp_demo_timer_stop(a2dp_media_sending_context_t * context);
 static void reclaim_arm(uint32_t delay_ms);

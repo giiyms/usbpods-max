@@ -61,7 +61,7 @@ Byte 0 = `0x01` (STATUS).
 | 12 | protocol minor (`1`) |
 | 13 | protocol major (`1`) |
 | 14 | UAC mute `0/1` |
-| 15 | flags2: bit0 owns, bit1 CA duck active, bit2 auto-conn, bit3 ear-detect enable |
+| 15 | flags2: bit0 owns, bit1 CA duck active, bit2 auto-conn, bit3 ear-detect enable, **bit4 reclaim**, **bit5 paused** (anti-ping-pong), **bit6 USB speaker alt≠0**, **bit7 USB PCM streaming** |
 | 16..21 | last headset BD_ADDR |
 | 22 | chime `0..100` |
 | 23 | crown dir |
@@ -73,25 +73,35 @@ Byte 0 = `0x01` (STATUS).
 | 30 | adaptive volume |
 | 31 | sleep detection |
 
-Name/model/serial/fw and last-19 hex also appear on the CDC `@STATUS` line (WebHID has no room for strings). AVRCP `vol` is **serial-only** (not in the 32-byte HID report). HID byte 14 is **UAC mic mute**, not speaker mute. The Pages UI shows both when present. `@STATUS` also reports `spk_misalign=` (USB speaker leftover 1–3 byte events; 0 is healthy).
+Name/model/serial/fw and last-19 hex also appear on the CDC `@STATUS` line (WebHID has no room for strings). AVRCP `vol` is **serial-only** (not in the 32-byte HID report). HID byte 14 is **UAC mic mute**, not speaker mute. The Pages UI shows both when present. `@STATUS` also reports `spk_misalign=` (USB speaker leftover 1–3 byte events; 0 is healthy). Dual-connect keys on `@STATUS` (same firmware state as flags2 / 0x0E parse — no invented opcodes): `reclaim=` steal-reclaim armed, `paused=` `we_paused_after_giveup`, `spk=` USB speaker open, `stream=` USB PCM streaming, `peer=` last `0x0E` audio-src MAC (`-` until the first parse).
 
 ## Settings page diagnostics
 
 GitHub Pages (`web/index.html`) can connect WebHID / Web Serial and:
 
-- Log STATUS **transitions** (not the 1 s poll) plus a 10 s heartbeat
+- Log STATUS **transitions** (not the 1 s HID poll) plus a 10 s heartbeat
 - Highlight ear on-head ↔ off-head (off-head may HID-pause the host)
 - Scope **getUserMedia** (mic monitor) and a **Speaker test** Oscillator via `setSinkId` when the browser allows it
+- **CDC console** (diagnostic log): attach **USBPods Max Console** beside WebHID, or as the Web Serial fallback. Every CDC text line is mirrored into the log (same `LOG_CAP` 800). Consecutive duplicate `@STATUS` lines from the status poll and the human `USBPods Max status` banner are collapsed so the cap is not burned. WebHID STATUS transitions still log when HID is up.
+- AACP hex / known opcodes are annotated from `AACP-FEATURES.md` (e.g. `0x0E` audio-src, `0x10` smart-routing, `0x11` SetOwnershipToFalse, `0x2E` connected devices, `0x06` OWNS, `0x20` autocon). Dual-connect lines (owns / they-own / reclaim / `0x11`) are highlighted.
+- **Export .aacp**: download a dump-replay fixture for `tests/aacp_dump_replay_test`. Only **full** AACP frames (`04 00 04 00 …`); truncated CDC previews (`…` / `...`) are skipped. `USB_SPK_OPEN` / `USB_STREAMING` are stubs from last `@STATUS` `spk=` / `stream=` (or HID flags2). `EXPECT` lines are omitted — fill by hand after a steal capture.
+- **Dual-connect** strip: owns, AACP, A2DP, duck, reclaim, paused (anti-ping-pong), USB speaker / streaming, last `0x0E` peer.
+
+**How to capture a steal dump:** Connect TinyUSB BT (HID), then **CDC console** → pick USBPods Max Console. Quiet sends `aacpdump on`. Play audio on the dongle, steal from the iPhone, then **Export .aacp**. Drop the file into `tests/fixtures/` and add `EXPECT` lines.
 
 **Browsers cannot tap Teams/YouTube PCM.** The speaker canvas is the page’s own test tone, not system playback. USB output activity on the page is A2DP / AVRCP vol / UAC mic mute / CA duck inferred from HID or `@STATUS`.
 
 ## CDC text
 
-Line-oriented, `\r` or `\n`. Extra verbs: `rename`, `crown`, `autoans`, `chime`, `adaptvol`, `sleep`, `listen`, `ear`, `gestures`, `hold`, `autocon`.
+Line-oriented, `\r` or `\n`. Extra verbs: `rename`, `crown`, `autoans`, `chime`, `adaptvol`, `sleep`, `listen`, `ear`, `gestures`, `hold`, `autocon`, **`aacpdump`**.
+
+`aacpdump on|off` — full hex for non-dual AACP packets. Dual-connect / smart-routing opcodes **`0x0E` / `0x10` / `0x11` / `0x2E`** (and control `0x06` OWNS / `0x20`) always print **complete** frames, even when `aacpdump` is off. Other hex dumps stay at a 24-byte preview unless `aacpdump on`. Quiet’s CDC console turns `aacpdump on` when the port opens. No UF2 on Pages; dump-replay wants these full lines, not the old 24-byte preview.
 
 ```
-@STATUS a2dp=1 aacp=1 mic=0 gain=6 slot=1 mute=0 … owns=1 duck=0 autocon=1 allowauto=0 earen=1 … last19=05 01 name=AirPods Max …
+@STATUS a2dp=1 aacp=1 mic=0 gain=6 slot=1 mute=0 … owns=1 duck=0 autocon=1 allowauto=0 earen=1 reclaim=0 paused=0 spk=1 stream=1 peer=aa:bb:cc:dd:ee:ff … last19=05 01 name=AirPods Max …
 @GAIN 6
+[AACP] 0x000E audio-src-resp n=13: 04 00 04 00 0E 00 FF EE DD CC BB AA 02
+[AACP] tx n=11: 04 00 04 00 09 00 06 01 00 00 00
 ```
 
 ## Mic gain

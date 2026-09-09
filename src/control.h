@@ -58,6 +58,7 @@ void control_main_task(void);
 
 // Fill a 32-byte HID/status report (CTRL_RSP_STATUS). Protocol minor 1
 // adds extras in bytes 15 and 22–31; bytes 0–14 and 16–21 stay compatible.
+// flags2 extra bits: 4 reclaim, 5 paused, 6 USB speaker, 7 USB streaming.
 void control_fill_status(uint8_t *buf, uint16_t len);
 
 // CDC/HID helpers used by control_usb.c (no TinyUSB types).

@@ -1235,6 +1235,7 @@
       cursor: pointer;
     }
     .btn-ghost:hover { background: var(--pill-hover); }
+    .btn-ghost.is-on { background: var(--green-soft); color: var(--green); }
     .diag-log-card {
       background: var(--card-bg);
       border: 1px solid var(--card-border);
@@ -1290,6 +1291,14 @@
     .log-line.kind-err { color: var(--red); border-left-color: var(--red); }
     .log-line.kind-warn { color: var(--amber); }
     .log-line.kind-heart { color: var(--text-tertiary); }
+    .log-line.kind-cdc { color: var(--text-muted); }
+    .log-line.kind-dual {
+      background: var(--amber-soft);
+      border-left-color: var(--amber);
+      font-weight: 600;
+    }
+    .dual-strip { margin-bottom: 12px; }
+    .dual-strip .hint-chips { margin-top: 6px; }
     .log-empty {
       padding: 18px 12px;
       color: var(--text-tertiary);
@@ -1503,6 +1512,9 @@
                 <dt>Mic</dt><dd><span class="status-tag tag-neutral" id="fMic">—</span></dd>
                 <dt>Duck</dt><dd><span class="status-tag tag-neutral" id="fDuck">—</span></dd>
                 <dt>Owns</dt><dd id="fOwns">—</dd>
+                <dt>Reclaim</dt><dd id="fReclaim">—</dd>
+                <dt>Paused</dt><dd id="fPaused">—</dd>
+                <dt>Peer</dt><dd id="fPeer">—</dd>
                 <dt>Addr</dt><dd id="fAddr">—</dd>
               </dl>
             </section>
@@ -1617,6 +1629,14 @@
           <div class="hint-warn-line" id="silentWarn"></div>
         </div>
 
+        <div class="hint-strip dual-strip" id="dualStrip">
+          <div class="hint-strip-head">
+            <span class="section-title">Dual-connect</span>
+            <span class="hint-strip-note">Owns / AACP / A2DP / duck plus reclaim, paused (anti-ping-pong), USB speaker, and last 0x0E peer — HID flags2 and <code>@STATUS</code>. No invented opcodes.</span>
+          </div>
+          <div class="hint-chips" id="dualChips"></div>
+        </div>
+
         <div class="snapshot-header" style="margin-bottom:0">
           <span class="snapshot-title">Diagnostics / Scope</span>
           <span class="snapshot-meta" id="diagMeta">mic closed · speaker idle</span>
@@ -1684,8 +1704,10 @@
           <div class="diag-log-head">
             <span class="section-title">Diagnostic log</span>
             <div class="diag-log-actions">
+              <button class="btn-ghost" id="btnCdc" type="button" title="Open Web Serial CDC beside HID, or instead of HID">CDC console</button>
               <button class="btn-ghost" id="btnCopyLog" type="button">Copy log</button>
               <button class="btn-ghost" id="btnDlLog" type="button">Download log</button>
+              <button class="btn-ghost" id="btnExportAacp" type="button" title="Export full AACP frames as a dump-replay fixture">Export .aacp</button>
               <button class="btn-ghost" id="btnClearLog" type="button">Clear</button>
             </div>
           </div>
@@ -1740,6 +1762,7 @@
     let serialWriter = null;
     let serialBuf = "";
     let pollTimer = null;
+    let cdcStatusTimer = null;
     let gainDebounce = null;
     let spatialOn = false;
     let lastCrown = "—";
@@ -1753,6 +1776,8 @@
     let lastA2dpAt = null;
     const LOG_CAP = 800;
     const logLines = [];
+    let lastRawStatus = "";
+    let cdcAttached = false;
     const micMon = { open: false, stream: null, ctx: null, analyser: null, src: null, raf: 0 };
     const spkTest = { running: false, ctx: null, analyser: null, osc: null, gain: null, sink: "", timer: 0 };
     let scopeRaf = 0;
@@ -1851,6 +1876,184 @@
       el.scrollTop = el.scrollHeight;
     }
     const setErr = (m) => { $("err").textContent = m || ""; };
+
+    /* AACP-FEATURES.md names only — do not invent opcodes. */
+    const AACP_OP_NAME = {
+      0x04: "battery", 0x06: "ear-detect", 0x09: "control",
+      0x0D: "audio-src-req", 0x0E: "audio-src", 0x0F: "request-notifications",
+      0x10: "smart-routing", 0x11: "SetOwnershipToFalse", 0x19: "stem",
+      0x1A: "rename", 0x1D: "device-info", 0x2D: "connected-dev-req",
+      0x2E: "connected-devices", 0x4B: "CA-speaking", 0x4D: "SET_FEATURE_FLAGS"
+    };
+    const AACP_CTRL_NAME = {
+      0x06: "OWNS", 0x0A: "ear-detect-en", 0x0D: "noise", 0x16: "click-hold",
+      0x1A: "listen-mask", 0x1C: "crown", 0x1E: "auto-answer", 0x1F: "chime",
+      0x20: "autocon", 0x26: "adapt-vol", 0x28: "CA", 0x34: "allow-off",
+      0x35: "sleep", 0x39: "gestures"
+    };
+    function isDualConnectLine(msg) {
+      const s = String(msg);
+      if (/\b(THEY_OWN|they own|they-own|SetOwnershipToFalse|anti-ping-pong|give up|give-up|reclaim|OWNS|owns=00)\b/i.test(s)) return true;
+      const bytes = hexBytesFromLine(s);
+      if (bytes && bytes.length >= 6 && bytes[0] === 0x04 && bytes[1] === 0 && bytes[2] === 0x04 && bytes[3] === 0) {
+        const op = bytes[4];
+        if (op === 0x0E || op === 0x10 || op === 0x11 || op === 0x2E || op === 0x0D || op === 0x2D) return true;
+        if (op === 0x09 && bytes.length >= 7 && (bytes[6] === 0x06 || bytes[6] === 0x20)) return true;
+      }
+      if (/\b0x0E\b|\b0x10\b|\b0x11\b|\b0x2E\b|\b0x06\b|\b0x20\b/i.test(s) &&
+          /audio-src|smart-routing|connected-dev|OWNS|autocon|SetOwnership/i.test(s)) return true;
+      return false;
+    }
+    function hexBytesFromLine(s) {
+      const m = String(s).match(/\b04(?:\s+[0-9A-Fa-f]{2}){5,}/);
+      if (!m) return null;
+      const parts = m[0].trim().split(/\s+/);
+      const out = [];
+      for (let i = 0; i < parts.length; i++) {
+        if (!/^[0-9A-Fa-f]{2}$/.test(parts[i])) break;
+        out.push(parseInt(parts[i], 16));
+      }
+      return out.length >= 6 ? out : null;
+    }
+    function lineLooksTruncated(s) {
+      return /…|\.\.\./.test(s);
+    }
+    function annotateAacpLine(msg) {
+      const s = String(msg);
+      if (/ · \(0x[0-9A-Fa-f]+ /.test(s)) return s;
+      const bytes = hexBytesFromLine(s);
+      if (!bytes) {
+        if (/\b0x0E\b/i.test(s) && /audio-src/i.test(s)) return s + " · 0x0E audio-src";
+        if (/\b0x11\b/i.test(s) && /SetOwnershipToFalse/i.test(s)) return s;
+        if (/\b0x10\b/i.test(s) && /smart-routing|hijack|takeOver|newTipi/i.test(s)) return s + " · 0x10 smart-routing";
+        if (/\b0x2E\b/i.test(s) && /connected-dev/i.test(s)) return s + " · 0x2E connected-devices";
+        return s;
+      }
+      const op = bytes[4];
+      const opName = AACP_OP_NAME[op];
+      let note = opName ? ("0x" + op.toString(16).toUpperCase().padStart(2, "0") + " " + opName) : null;
+      if (op === 0x09 && bytes.length >= 7) {
+        const id = bytes[6];
+        const idn = AACP_CTRL_NAME[id];
+        note = "0x09 control" + (idn ? (" id 0x" + id.toString(16).toUpperCase().padStart(2, "0") + " " + idn) : "");
+      }
+      if (!note) return s;
+      if (s.indexOf(opName || "\0") >= 0 && op !== 0x09) return s + " · " + note;
+      return s + " · " + note;
+    }
+    function cdcLogKind(line) {
+      if (isDualConnectLine(line)) return "dual";
+      if (/\[A2DP\].*reclaim|unexpected pause|START rejected|steal/i.test(line)) return "dual";
+      if (/down|FAIL|error/i.test(line) && !/^HEARTBEAT/.test(line)) return "down";
+      if (/^\[AACP\] IMU /.test(line)) return "cdc";
+      return "cdc";
+    }
+    function isHumanStatusBanner(line) {
+      if (line === "USBPods Max status") return true;
+      return /^  (A2DP |mic gain |battery |noise-control |name '|last 0x0019)/.test(line);
+    }
+    function logCdcLine(line) {
+      if (!line) return;
+      if (line.startsWith("@STATUS")) {
+        if (line === lastRawStatus) return;
+        lastRawStatus = line;
+        log(annotateAacpLine(line), isDualConnectLine(line) ? "dual" : "cdc");
+        return;
+      }
+      if (isHumanStatusBanner(line)) return;
+      log(annotateAacpLine(line), cdcLogKind(line));
+    }
+    function extractFullAacpFrame(msg) {
+      const s = String(msg);
+      if (lineLooksTruncated(s)) return null;
+      const bytes = hexBytesFromLine(s);
+      if (!bytes || bytes[0] !== 0x04 || bytes[1] !== 0 || bytes[2] !== 0x04 || bytes[3] !== 0) return null;
+      const nMatch = s.match(/\bn=(\d+):/);
+      if (nMatch && bytes.length !== Number(nMatch[1])) return null;
+      if (bytes.length < 6) return null;
+      return bytes.map((b) => b.toString(16).toUpperCase().padStart(2, "0")).join(" ");
+    }
+    function buildAacpFixture() {
+      const stamp = new Date().toISOString();
+      const head = [
+        "# Quiet export — USBPods Max diagnostic log → aacp_dump_replay_test",
+        "#",
+        "# Full AACP frames only. Truncated CDC previews (… / ...) were skipped.",
+        "# USB_SPK_OPEN / USB_STREAMING are stubs from last known @STATUS (spk= / stream=)",
+        "# or HID flags2. EXPECT lines are omitted — fill by hand after a steal capture.",
+        "# Syntax matches tests/fixtures/dual_connect_iphone_steal.aacp.",
+        "#",
+        "# exported: " + stamp,
+        "# page: " + (typeof location !== "undefined" ? location.href : ""),
+        "#"
+      ];
+      const body = [];
+      let spk = null;
+      let stream = null;
+      if (currentStatus) {
+        if (currentStatus.spk !== undefined) spk = currentStatus.spk ? 1 : 0;
+        if (currentStatus.usbstream !== undefined) stream = currentStatus.usbstream ? 1 : 0;
+      }
+      let our = "AA:BB:CC:DD:EE:FF";
+      body.push("OUR_MAC " + our + "  # Pico local BD_ADDR is not on @STATUS; replace if known");
+      const emitUsb = (nextSpk, nextStream) => {
+        if (nextSpk !== null && nextSpk !== spk) {
+          spk = nextSpk;
+          body.push("USB_SPK_OPEN " + spk);
+        }
+        if (nextStream !== null && nextStream !== stream) {
+          stream = nextStream;
+          body.push("USB_STREAMING " + stream);
+        }
+      };
+      if (spk === null) {
+        body.push("USB_SPK_OPEN 1  # stub — last STATUS had no spk=; confirm before EXPECT");
+        spk = 1;
+      } else {
+        body.push("USB_SPK_OPEN " + spk);
+      }
+      if (stream === null) {
+        body.push("USB_STREAMING 1  # stub — last STATUS had no stream=; confirm before EXPECT");
+        stream = 1;
+      } else {
+        body.push("USB_STREAMING " + stream);
+      }
+      body.push("");
+      let frames = 0;
+      let skipped = 0;
+      for (let i = 0; i < logLines.length; i++) {
+        const msg = logLines[i].msg;
+        const kv = {};
+        if (/@STATUS/.test(msg) || /^STATUS /.test(msg)) {
+          const raw = msg.indexOf("@STATUS") >= 0 ? msg.slice(msg.indexOf("@STATUS")) : msg;
+          const bits = raw.trim().split(/\s+/).slice(1);
+          for (let p = 0; p < bits.length; p++) {
+            const eq = bits[p].indexOf("=");
+            if (eq > 0) kv[bits[p].slice(0, eq)] = bits[p].slice(eq + 1);
+          }
+          const ns = (kv.spk === "1") ? 1 : (kv.spk === "0" ? 0 : null);
+          const nst = (kv.stream === "1") ? 1 : (kv.stream === "0" ? 0 : null);
+          emitUsb(ns, nst);
+        }
+        if (lineLooksTruncated(msg) && hexBytesFromLine(msg)) {
+          skipped++;
+          continue;
+        }
+        const frame = extractFullAacpFrame(msg);
+        if (!frame) continue;
+        const nbytes = frame.split(/\s+/).length;
+        body.push("[AACP] quiet-export n=" + nbytes + ": " + frame);
+        frames++;
+      }
+      head.push("# frames=" + frames + " skipped_truncated=" + skipped);
+      if (frames === 0) {
+        head.push("# No full AACP frames in this log. Attach CDC console, send `aacpdump on`,");
+        head.push("# reproduce the steal, then export again. Dual-connect 0x0E/0x10/0x11/0x2E");
+        head.push("# dump complete frames even when aacpdump is off.");
+      }
+      head.push("");
+      return head.concat(body).join("\n") + "\n";
+    }
 
     function dbStr(db) {
       if (!isFinite(db)) return "−∞ dBFS";
@@ -1979,10 +2182,15 @@
         gain: (typeof s.gain === "number" && !Number.isNaN(s.gain)) ? (s.gain + " dB") : "—",
         noise: noiseName(s.noise),
         ca: caLabel(s.ca),
-        dec_err: (s.dec_err === undefined || s.dec_err === "" || Number.isNaN(Number(s.dec_err))) ? "—" : String(s.dec_err)
+        dec_err: (s.dec_err === undefined || s.dec_err === "" || Number.isNaN(Number(s.dec_err))) ? "—" : String(s.dec_err),
+        reclaim: s.reclaim ? "yes" : (s.reclaim === false || s.reclaim === 0 ? "no" : "—"),
+        paused: s.paused ? "yes" : (s.paused === false || s.paused === 0 ? "no" : "—"),
+        spk: s.spk === undefined ? "—" : (s.spk ? "open" : "closed"),
+        usbstream: s.usbstream === undefined ? "—" : (s.usbstream ? "1" : "0"),
+        peer: dashName(s.peer)
       };
     }
-    const SNAP_KEYS = ["a2dp", "aacp", "mic", "duck", "ear_l", "ear_r", "ear", "owns", "addr", "vol", "mute", "last19", "name", "gain", "noise", "ca", "dec_err"];
+    const SNAP_KEYS = ["a2dp", "aacp", "mic", "duck", "ear_l", "ear_r", "ear", "owns", "reclaim", "paused", "spk", "usbstream", "peer", "addr", "vol", "mute", "last19", "name", "gain", "noise", "ca", "dec_err"];
     function formatSnap(snap) {
       return SNAP_KEYS.map((k) => k + "=" + snap[k]).join(" ");
     }
@@ -2006,6 +2214,8 @@
       if (changes.length) {
         let kind = "info";
         if (snap.ear !== prev.ear) kind = "ear";
+        else if (snap.owns !== prev.owns || snap.reclaim !== prev.reclaim || snap.paused !== prev.paused)
+          kind = "dual";
         else if ((snap.a2dp === "down" && prev.a2dp === "up") || (snap.aacp === "down" && prev.aacp === "up") || (snap.mic === "off" && prev.mic === "on")) kind = "down";
         else if ((snap.a2dp === "up" && prev.a2dp === "down") || (snap.aacp === "up" && prev.aacp === "down") || (snap.mic === "on" && prev.mic === "off")) kind = "up";
         log("STATUS " + changes.join(" · "), kind);
@@ -2068,7 +2278,35 @@
       setText("micHidState", hidMic);
       setText("micStreamState", stream);
       paintOutputActivity();
-      setText("diagMeta", stream + " · speaker " + (spkTest.running ? "test" : "idle"));
+      paintDualStrip();
+      const cdcNote = cdcAttached ? " · CDC console" : "";
+      setText("diagMeta", stream + " · speaker " + (spkTest.running ? "test" : "idle") + cdcNote);
+    }
+    function paintDualStrip() {
+      const el = $("dualChips");
+      if (!el) return;
+      const snap = lastStatusSnap;
+      const owns = snap ? snap.owns : "—";
+      const aacp = snap ? snap.aacp : "—";
+      const a2dp = snap ? snap.a2dp : "—";
+      const duck = snap ? snap.duck : "—";
+      const reclaim = snap ? snap.reclaim : "—";
+      const paused = snap ? snap.paused : "—";
+      const spk = snap ? snap.spk : "—";
+      const usbstream = snap ? snap.usbstream : "—";
+      const peer = snap ? snap.peer : "—";
+      el.innerHTML = [
+        chip("Owns", owns, owns === "yes" ? "ok" : (owns === "no" ? "warn" : "idle")),
+        chip("AACP", aacp, aacp === "up" ? "ok" : (aacp === "down" ? "bad" : "idle")),
+        chip("A2DP", a2dp, a2dp === "up" ? "ok" : (a2dp === "down" ? "bad" : "idle")),
+        chip("Duck", duck, duck === "ducking" ? "warn" : "idle"),
+        chip("Reclaim", reclaim, reclaim === "yes" ? "warn" : "idle"),
+        chip("Paused", paused, paused === "yes" ? "warn" : "idle"),
+        chip("USB spk", spk, spk === "open" ? "ok" : "idle"),
+        chip("USB stream", usbstream, usbstream === "1" ? "ok" : "idle"),
+        chip("Peer 0x0E", peer, peer && peer !== "—" ? "warn" : "idle"),
+        chip("CDC", cdcAttached ? "console" : "off", cdcAttached ? "ok" : "idle")
+      ].join("");
     }
     function pill(k, v, cls) {
       return '<span class="out-pill ' + (cls || "") + '"><span class="k">' + k + '</span><span class="v">' + v + "</span></span>";
@@ -2103,6 +2341,9 @@
         " vol=" + (s ? s.vol : "—") +
         " duck=" + (s ? s.duck : "—") +
         " owns=" + (s ? s.owns : "—") +
+        " reclaim=" + (s ? s.reclaim : "—") +
+        " paused=" + (s ? s.paused : "—") +
+        " cdc=" + (cdcAttached ? "on" : "off") +
         " speaker_test=" + (spkTest.running ? "on" : "off"), "heart");
     }
 
@@ -2204,6 +2445,7 @@
     }
 
     function applyStatus(s) {
+      if (currentStatus && s.peer === undefined) s.peer = currentStatus.peer;
       const ear = earLabel(s.ear_l, s.ear_r);
       $("stEar").textContent = ear;
       setCrown(s);
@@ -2236,6 +2478,9 @@
       setTag("fMic", !!s.mic, "on", "off");
       setTag("fDuck", !!s.duck, "ducking", "idle");
       setText("fOwns", s.owns === 1 || s.owns === true ? "yes" : (s.owns === 2 || s.owns === false ? "no" : "—"));
+      setText("fReclaim", s.reclaim ? "yes" : (s.reclaim === false || s.reclaim === 0 ? "no" : "—"));
+      setText("fPaused", s.paused ? "yes" : (s.paused === false || s.paused === 0 ? "no" : "—"));
+      setText("fPeer", dashName(s.peer));
       setText("fAddr", s.addr || "—");
       setText("fRadioBadge", "Slot " + (s.slot || "—") + " · Owns: " + (s.owns === 1 || s.owns === true ? "yes" : (s.owns === 2 ? "no" : "—")));
       setText("fEar", unk(s.ear_l) && unk(s.ear_r) ? "—" : ("L=" + (unk(s.ear_l) ? "—" : s.ear_l) + " · R=" + (unk(s.ear_r) ? "—" : s.ear_r) + " · " + ear.toLowerCase()));
@@ -2279,6 +2524,8 @@
         noise: u[8], ear_l: u[9], ear_r: u[10], ca: u[11],
         owns: flags2 & 1 ? 1 : 2, duck: !!(flags2 & 2),
         autocon: flags2 & 4 ? 1 : 2, earen: flags2 & 8 ? 1 : 2,
+        reclaim: !!(flags2 & 0x10), paused: !!(flags2 & 0x20),
+        spk: !!(flags2 & 0x40), usbstream: !!(flags2 & 0x80),
         chime: u[22], crown: u[23], listen: u[24], gestures: u[25], hold: u[26],
         last19_type: u[27], last19_bud: u[28],
         autoans: u[29], adaptvol: u[30], sleep: u[31],
@@ -2327,6 +2574,11 @@
         earen: Number(kv.earen), gestures: Number(kv.gestures), hold: Number(kv.hold),
         crown: Number(kv.crown), autoans: Number(kv.autoans), chime: Number(kv.chime),
         adaptvol: Number(kv.adaptvol), sleep: Number(kv.sleep), listen: Number(kv.listen),
+        reclaim: kv.reclaim !== undefined ? kv.reclaim === "1" : undefined,
+        paused: kv.paused !== undefined ? kv.paused === "1" : undefined,
+        spk: kv.spk !== undefined ? kv.spk === "1" : undefined,
+        usbstream: kv.stream !== undefined ? kv.stream === "1" : undefined,
+        peer: kv.peer && kv.peer !== "-" ? kv.peer : undefined,
         model: kv.model, serial: kv.serial, fw: kv.fw,
         mute: kv.mute, dec_err: kv.dec_err
       });
@@ -2365,7 +2617,7 @@
         b.setAttribute("aria-checked", "false");
       });
       ["stEar", "stCa", "stRadio", "stSlot", "stAddr", "pinRadio", "pinEarL", "pinEarR",
-       "fEar", "fNoise", "fCa", "fOwns", "fAddr", "fSerial", "fModel", "fFw", "fName",
+       "fEar", "fNoise", "fCa", "fOwns", "fReclaim", "fPaused", "fPeer", "fAddr", "fSerial", "fModel", "fFw", "fName",
        "fGain", "fMute", "fDecErr", "fAutocon", "fEaren", "fAutoans", "fAdaptvol", "fSleep",
        "fChime", "fListen", "fHold", "fGestures", "fCrownDir", "fRadioBadge", "fEarBadge",
        "fIdentBadge", "fGrabBadge"].forEach((id) => setText(id, "—"));
@@ -2386,7 +2638,45 @@
       setTag("fDuck", false, "ducking", "—");
       setText("stFindmy", "Pico cannot join iCloud");
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      if (cdcStatusTimer) { clearInterval(cdcStatusTimer); cdcStatusTimer = null; }
+      lastRawStatus = "";
+      cdcAttached = false;
+      serialBuf = "";
+      paintCdcButton();
       paintSilentHints();
+    }
+
+    function paintCdcButton() {
+      const b = $("btnCdc");
+      if (!b) return;
+      b.textContent = cdcAttached ? "CDC live" : "CDC console";
+      b.classList.toggle("is-on", !!cdcAttached);
+    }
+
+    function takeCdcLines() {
+      const out = [];
+      while (true) {
+        const n = serialBuf.search(/[\r\n]/);
+        if (n < 0) break;
+        const line = serialBuf.slice(0, n);
+        const ch = serialBuf[n];
+        serialBuf = serialBuf.slice(n + 1);
+        if (ch === "\r" && serialBuf.charAt(0) === "\n") serialBuf = serialBuf.slice(1);
+        out.push(line);
+      }
+      return out;
+    }
+
+    function handleCdcLine(line) {
+      if (!line) return;
+      if (line.startsWith("@")) parseAtLine(line);
+      else if (/\[AACP\] IMU /.test(line)) {
+        const el = $("stImu");
+        if (el) el.textContent = line.replace("[AACP] ", "");
+      } else if (/0x0019/i.test(line)) {
+        noteCrown(line);
+      }
+      logCdcLine(line);
     }
 
     async function sendHid(cmd, arg) {
@@ -2433,45 +2723,57 @@
     }
 
     async function connectSerial() {
+      if (cdcAttached) {
+        log("CDC console already open");
+        return;
+      }
       if (!navigator.serial) throw new Error("Web Serial not available");
       const port = await navigator.serial.requestPort({ filters: [{ usbVendorId: VID }] });
       await port.open({ baudRate: 115200 });
       serial = port;
       serialWriter = port.writable.getWriter();
       serialReader = port.readable.getReader();
-      setConnected("Web Serial");
-      log("Serial connect", "up");
-      await sendSerial("status");
-      pollTimer = setInterval(() => sendSerial("status"), 1000);
+      cdcAttached = true;
+      paintCdcButton();
+      const besideHid = !!hid;
+      if (!besideHid) {
+        setConnected("Web Serial");
+        log("Serial connect", "up");
+        await sendSerial("status");
+        if (!pollTimer) pollTimer = setInterval(() => sendSerial("status"), 1000);
+      } else {
+        log("CDC console attached beside WebHID", "up");
+        await sendSerial("status");
+        if (!cdcStatusTimer) cdcStatusTimer = setInterval(() => sendSerial("status"), 2000);
+      }
+      await sendSerial("aacpdump on");
+      paintSilentHints();
       (async () => {
         const dec = new TextDecoder();
         try {
           while (true) {
+            if (!serialReader) break;
             const { value, done } = await serialReader.read();
             if (done) break;
             serialBuf += dec.decode(value, { stream: true });
-            let n;
-            while ((n = serialBuf.indexOf("\n")) >= 0) {
-              const line = serialBuf.slice(0, n).replace(/\r$/, "");
-              serialBuf = serialBuf.slice(n + 1);
-              if (line.startsWith("@")) parseAtLine(line);
-              else if (/\[AACP\] IMU /.test(line)) {
-                const el = $("stImu");
-                if (el) el.textContent = line.replace("[AACP] ", "");
-              } else if (/0x0019/i.test(line)) {
-                noteCrown(line);
-                log(line);
-              } else if (line && !line.startsWith("@STATUS")) {
-                if (/^\[(AACP|HID|EAR|MIC|DEC|CA)\]/i.test(line)) log(line);
-              }
-            }
+            const lines = takeCdcLines();
+            for (let i = 0; i < lines.length; i++) handleCdcLine(lines[i]);
           }
         } catch (e) {
           log("serial read ended: " + e.message, "warn");
         }
         serial = null; serialWriter = null; serialReader = null;
-        setDisconnected();
-        log("Serial disconnect", "down");
+        serialBuf = "";
+        cdcAttached = false;
+        if (cdcStatusTimer) { clearInterval(cdcStatusTimer); cdcStatusTimer = null; }
+        paintCdcButton();
+        if (!hid) {
+          setDisconnected();
+          log("Serial disconnect", "down");
+        } else {
+          log("CDC console closed", "down");
+          paintSilentHints();
+        }
       })();
     }
 
@@ -2494,12 +2796,17 @@
 
     $("btnDisconnectApp").onclick = async () => {
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      if (cdcStatusTimer) { clearInterval(cdcStatusTimer); cdcStatusTimer = null; }
       try { if (hid) { await hid.close(); hid = null; } } catch (_) {}
       try {
         if (serialReader) { await serialReader.cancel(); serialReader = null; }
         if (serialWriter) { serialWriter.releaseLock(); serialWriter = null; }
         if (serial) { await serial.close(); serial = null; }
       } catch (_) {}
+      cdcAttached = false;
+      serialBuf = "";
+      lastRawStatus = "";
+      paintCdcButton();
       setDisconnected();
       log("Released HID/Serial", "down");
     };
@@ -2859,6 +3166,26 @@
         try { await stopSpeakerTest("error"); } catch (_) {}
       }
     };
+    $("btnCdc").onclick = async () => {
+      setErr("");
+      try {
+        await connectSerial();
+      } catch (e) {
+        setErr(e.message);
+        log("CDC console failed: " + e.message, "err");
+      }
+    };
+    $("btnExportAacp").onclick = () => {
+      const text = buildAacpFixture();
+      const blob = new Blob([text], { type: "text/plain" });
+      const a = document.createElement("a");
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      a.href = URL.createObjectURL(blob);
+      a.download = "quiet-steal-" + stamp + ".aacp";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      log("exported .aacp fixture");
+    };
     $("btnCopyLog").onclick = async () => {
       const text = logText();
       try {
@@ -2897,6 +3224,7 @@
 
     paintGain(0);
     paintSilentHints();
+    paintCdcButton();
     drawScope($("micCanvas"), null, "#9c9486");
     drawScope($("spkCanvas"), null, "#9c9486");
     paintMeter("micPeakFill", "micPeakDb", -Infinity);
