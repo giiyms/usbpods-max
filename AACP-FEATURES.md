@@ -65,7 +65,7 @@ iPhone can keep the AACP/HFP session so crown volume hits the phone. Firmware al
 
 **DID caveat:** LibrePods notes smart-routing / hijack often requires Apple Device Identification Profile vendor ID acceptance. Without it, `0x10` may no-op even though packets are sent.
 
-Host-side policy (`src/btstack/dual_connect_policy.h`, `src/btstack/aacp_smart_routing.h`; tests in `tests/dual_connect_policy_test.c`, `tests/aacp_smart_routing_test.c`):
+Host-side policy (`src/btstack/dual_connect_policy.h`, `src/btstack/aacp_smart_routing.h`; tests in `tests/dual_connect_policy_test.c`, `tests/aacp_smart_routing_test.c`, `tests/aacp_dump_replay_test.c`):
 
 - States: USB_IDLE / WE_OWN_STREAMING / THEY_OWN / RECLAIMING / GIVE_UP.
 - Reclaim on unexpected pause / START reject only when USB wants the sink.
@@ -74,6 +74,7 @@ Host-side policy (`src/btstack/dual_connect_policy.h`, `src/btstack/aacp_smart_r
 - Post-reclaim Play gated on `we_paused_for_steal`. Stop reclaim if OWNS stays `00`.
 - **`0x10` smart-routing hijack implemented** (verbatim LibrePods Android builders; USB_IDLE → no send; reclaim path after OWNS).
 - **`0x11` SetOwnershipToFalse implemented** (LibrePods `AACPManager` substring parse + `AirPodsService.onOwnershipToFalseRequest`): pause + `we_paused_after_giveup`; reclaim/hijack gated until anti-ping-pong clears.
+- **Policy replay** (`tests/aacp_dump_replay_test.c`, golden `tests/fixtures/dual_connect_iphone_steal.aacp`): sequenced AACP hex + `USB_SPK_OPEN` / `USB_STREAMING` through the same helpers. This is **not** air / DID / Windows UAC proof. Live CDC hex dumps can be dropped into `tests/fixtures/` later (full frames, not the 24-byte preview, plus `USB_*` / `EXPECT` lines).
 
 ## DID / advertising vs LibrePods Tipi (0x10 acceptance)
 

@@ -1,0 +1,54 @@
+# Dual-connect iPhone steal — AACP policy replay
+#
+# This is a host-side *policy* fixture, not a radio / Apple DID / Windows UAC
+# simulation. Packet shapes are copied from tests/dual_connect_policy_test.c
+# and tests/aacp_smart_routing_test.c (LibrePods AACPManager). No invented
+# opcodes or blobs.
+#
+# Syntax (one directive per line; # starts a comment):
+#   OUR_MAC AA:BB:CC:DD:EE:FF
+#   USB_SPK_OPEN 0|1
+#   USB_STREAMING 0|1
+#   STEAL                          # unexpected AVDTP pause
+#   HEX 04 00 04 00 ...            # AACP frame (optional label token before hex)
+#   04 00 04 00 ...                # raw hex line (CDC paste)
+#   [AACP] tag n=N: 04 00 ...      # full CDC dump line (not the 24-byte preview)
+#   EXPECT key=val ...             # reclaim/hijack/paused/state/giveup/pause/...
+#
+# Live CDC: paste complete frames into tests/fixtures/ (not truncated n=… lines),
+# add USB_SPK_OPEN / USB_STREAMING around them, and EXPECT the decisions.
+
+OUR_MAC 11:22:33:44:55:66
+
+# --- USB streaming (we own) ---
+USB_SPK_OPEN 1
+USB_STREAMING 1
+EXPECT reclaim=1 hijack=1 paused=0 state=WE_OWN_STREAMING
+
+# --- peer 0x0E MEDIA + 0x2E connected-devices (noise; we still own) ---
+# Display MAC AA:BB:CC:DD:EE:FF → packet bytes FF EE DD CC BB AA, type MEDIA
+HEX 04 00 04 00 0E 00 FF EE DD CC BB AA 02
+EXPECT 0e_they_own=1 reclaim=1 hijack=1 paused=0 state=WE_OWN_STREAMING
+
+# Two devices: iPhone + us (same records as dual_connect_policy_test)
+HEX 04 00 04 00 2E 00 00 00 02 AA BB CC DD EE FF 01 02 11 22 33 44 55 66 03 04
+EXPECT 0x2e_count=2 reclaim=1 hijack=1 paused=0
+
+# --- 0x11 SetOwnershipToFalse from iPhone-like MAC ---
+# Opcode 0x11, sender MAC reversed, substring audioRoutingSetOwnershipToFalse
+HEX 04 00 04 00 11 00 FF EE DD CC BB AA 61 75 64 69 6F 52 6F 75 74 69 6E 67 53 65 74 4F 77 6E 65 72 73 68 69 70 54 6F 46 61 6C 73 65
+EXPECT 0x11 recognized=1 pause=1 giveup=1 hijack=0 reclaim=0 paused=1 state=THEY_OWN sender=AA:BB:CC:DD:EE:FF
+
+# Auto-resume while we_paused must not reclaim / must not 0x10 hijack
+EXPECT reclaim=0 hijack=0 paused=1 state=THEY_OWN
+
+# --- USB streaming rising edge (host Play after HID Pause) clears anti-ping-pong ---
+# Speaker alt stays open the whole time: idle-open alt-set must not clear.
+USB_STREAMING 0
+EXPECT paused=1 reclaim=0 hijack=0 state=THEY_OWN
+USB_STREAMING 1
+EXPECT paused=0 reclaim=1 hijack=1 state=WE_OWN_STREAMING
+
+# Reclaim path would send OWNS+0x20 and 0x10 only when gates allow
+STEAL
+EXPECT state=RECLAIMING reclaim=1 hijack=1 paused=0

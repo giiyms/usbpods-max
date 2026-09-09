@@ -17,6 +17,8 @@ jobs:
           /tmp/dual_connect_policy_test
           gcc -I. -O2 -o /tmp/aacp_smart_routing_test tests/aacp_smart_routing_test.c
           /tmp/aacp_smart_routing_test
+          gcc -I. -O2 -o /tmp/aacp_dump_replay_test tests/aacp_dump_replay_test.c
+          /tmp/aacp_dump_replay_test tests/fixtures/dual_connect_iphone_steal.aacp
           gcc -I. -O2 -o /tmp/aacp_ear_test tests/aacp_ear_test.c
           /tmp/aacp_ear_test
           gcc -I. -O2 -o /tmp/avdtp_reclaim_test tests/avdtp_reclaim_test.c
