@@ -15,8 +15,9 @@
 
 typedef struct {
     uint8_t  rem[SPK_STEREO_FRAME_BYTES];
-    uint8_t  rem_len;     // 0..3
+    uint8_t  rem_len;     // 0..3 current sticky leftover
     uint32_t misalign;    // times a leftover was stashed (CDC counter)
+    uint32_t half;        // leftover == 2 (one-channel / swap-suspect)
 } spk_frame_align_t;
 
 static inline void spk_frame_align_reset(spk_frame_align_t *s) {
@@ -55,6 +56,7 @@ static inline uint16_t spk_frame_align_ingest(spk_frame_align_t *s,
         memcpy(s->rem, buf + aligned, leftover);
         s->rem_len = (uint8_t)leftover;
         s->misalign++;
+        if (leftover == 2) s->half++;
     }
     return aligned;
 }

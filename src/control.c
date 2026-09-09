@@ -154,13 +154,16 @@ void control_print_status_human(void) {
         (void) ptype;
     }
 
+    int8_t spk_l = -96, spk_r = -96;
+    usb_spk_levels_dbfs(&spk_l, &spk_r);
+
     printf("@STATUS a2dp=%u aacp=%u mic=%u gain=%u slot=%u mute=%u "
            "bat_l=%u bat_r=%u bat_c=%u bat_h=%u noise=%u ear_l=%u ear_r=%u ca=%u "
            "owns=%u duck=%u autocon=%u allowauto=%u earen=%u gestures=%u hold=%u "
            "crown=%u autoans=%u chime=%u adaptvol=%u sleep=%u listen=%u "
            "reclaim=%u paused=%u spk=%u stream=%u peer=%s "
            "last19=%s vol=%u name=%s model=%s serial=%s fw=%s findmy=unsupported "
-           "spk_misalign=%lu "
+           "spk_misalign=%lu spk_rem=%u spk_half=%lu spk_swap=%u spk_l=%d spk_r=%d "
            "addr=%02x:%02x:%02x:%02x:%02x:%02x\n",
            (buf[1] & 0x01) ? 1 : 0,
            (buf[1] & 0x02) ? 1 : 0,
@@ -185,6 +188,10 @@ void control_print_status_human(void) {
            aacp_get_dev_serial()[0] ? aacp_get_dev_serial() : "-",
            aacp_get_dev_fw()[0] ? aacp_get_dev_fw() : "-",
            (unsigned long) usb_spk_misalign_count(),
+           (unsigned) usb_spk_rem_len(),
+           (unsigned long) usb_spk_half_count(),
+           (unsigned) usb_spk_swap_suspect(),
+           (int) spk_l, (int) spk_r,
            buf[16], buf[17], buf[18], buf[19], buf[20], buf[21]);
 }
 

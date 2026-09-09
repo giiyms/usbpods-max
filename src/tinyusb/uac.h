@@ -13,3 +13,7 @@ bool usb_mic_take_stop_request(void);
 
 // USB speaker ISO leftover 1–3 byte events (sticky remainder; CDC / @STATUS).
 uint32_t usb_spk_misalign_count(void);
+uint8_t  usb_spk_rem_len(void);
+uint32_t usb_spk_half_count(void);
+uint8_t  usb_spk_swap_suspect(void);
+void     usb_spk_levels_dbfs(int8_t *l, int8_t *r);

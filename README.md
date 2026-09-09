@@ -73,8 +73,9 @@ The page’s **Diagnostics / Scope** section is for cutouts (Teams/YouTube silen
 
 1. Connect HID. Watch **Why silent?** — especially Ear on-head vs off-head (off-head can HID-pause the host) and A2DP up/down.
 2. **Speaker test** plays a tone/sweep from the page and scopes *that* waveform. Use `setSinkId` to TinyUSB BT when Chrome exposes it. **Browsers cannot tap Teams or YouTube PCM.** If the test is audible in the cans, the USB speaker path works; if not, check A2DP / off-head / Windows default device.
-3. **Start mic monitor** opens the UAC input (TinyUSB/USBPods/Pico label, same picker as Record 3s) and shows a live oscilloscope + peak/RMS. Compare “mic stream open” with the HID mic flag.
-4. When audio dies, **Copy log** or **Download log** and paste it into an issue. The log is transitions + a 10s heartbeat, not every 1s STATUS poll.
+3. **Balance / Align** (Connect HID, then **CDC console**): ear L/R plus USB speaker `spk_l`/`spk_r` dBFS and `spk_misalign`. “Left-weighted” can be one ear off, climbing misalign / `spk_rem=2`, or a large L vs R USB PCM gap — not a tap of Teams/YouTube.
+4. **Start mic monitor** opens the UAC input (TinyUSB/USBPods/Pico label, same picker as Record 3s) and shows a live oscilloscope + peak/RMS. Compare “mic stream open” with the HID mic flag.
+5. When audio dies, **Copy log** or **Download log** and paste it into an issue. The log is transitions + a 10s heartbeat, not every 1s STATUS poll.
 
 Enable Pages: repo Settings → Pages → GitHub Actions (workflow [`.github/workflows/pages.yml`](.github/workflows/pages.yml) publishes `web/`).
 

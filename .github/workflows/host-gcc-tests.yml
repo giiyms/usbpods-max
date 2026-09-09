@@ -29,3 +29,5 @@ jobs:
           /tmp/spk_frame_align_test
           gcc -I. -O2 -o /tmp/host_session_wake_test tests/host_session_wake_test.c
           /tmp/host_session_wake_test
+          gcc -I. -O2 -o /tmp/spk_level_meter_test tests/spk_level_meter_test.c
+          /tmp/spk_level_meter_test

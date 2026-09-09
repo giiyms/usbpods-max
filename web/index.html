@@ -1087,6 +1087,25 @@
       display: none;
     }
     .hint-warn-line.show { display: block; }
+    .hint-strip.balance-alert {
+      border-color: var(--amber-border);
+      background: #fffbeb;
+    }
+    .balance-meters {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .balance-src-note {
+      font-size: 10.5px;
+      color: var(--text-tertiary);
+      font-weight: 500;
+      line-height: 1.4;
+    }
+    .balance-src-note code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+    }
     .scope-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -1637,6 +1656,28 @@
           <div class="hint-chips" id="dualChips"></div>
         </div>
 
+        <div class="hint-strip" id="balanceStrip">
+          <div class="hint-strip-head">
+            <span class="section-title">Balance / Align</span>
+            <span class="hint-strip-note">Browser cannot tap Teams/YouTube. These meters are dongle USB speaker PCM + ear sensors.</span>
+          </div>
+          <div class="hint-chips" id="balanceChips"></div>
+          <div class="balance-meters">
+            <div class="meter-row">
+              <span class="meter-lab">USB L</span>
+              <div class="meter-track"><div class="meter-fill" id="balLFill"></div></div>
+              <span class="meter-db" id="balLDb">— dBFS</span>
+            </div>
+            <div class="meter-row">
+              <span class="meter-lab">USB R</span>
+              <div class="meter-track"><div class="meter-fill" id="balRFill"></div></div>
+              <span class="meter-db" id="balRDb">— dBFS</span>
+            </div>
+          </div>
+          <p class="balance-src-note" id="balanceSrc">L/R USB PCM levels are serial-only (<code>@STATUS spk_l= spk_r=</code>). Connect HID, then CDC console. Ear L/R already come from HID. Cross-correlation lag is not measured (deferred — Pico CPU).</p>
+          <div class="hint-warn-line" id="balanceWarn"></div>
+        </div>
+
         <div class="snapshot-header" style="margin-bottom:0">
           <span class="snapshot-title">Diagnostics / Scope</span>
           <span class="snapshot-meta" id="diagMeta">mic closed · speaker idle</span>
@@ -1760,6 +1801,7 @@
     let serial = null;
     let serialReader = null;
     let serialWriter = null;
+    const serialEnc = new TextEncoder();
     let serialBuf = "";
     let pollTimer = null;
     let cdcStatusTimer = null;
@@ -1774,6 +1816,7 @@
     let lastStatusSnap = null;
     let lastEarAt = null;
     let lastA2dpAt = null;
+    let lastSpkMisalign = null;
     const LOG_CAP = 800;
     const logLines = [];
     let lastRawStatus = "";
@@ -2187,10 +2230,16 @@
         paused: s.paused ? "yes" : (s.paused === false || s.paused === 0 ? "no" : "—"),
         spk: s.spk === undefined ? "—" : (s.spk ? "open" : "closed"),
         usbstream: s.usbstream === undefined ? "—" : (s.usbstream ? "1" : "0"),
-        peer: dashName(s.peer)
+        peer: dashName(s.peer),
+        spk_misalign: (s.spk_misalign === undefined || Number.isNaN(Number(s.spk_misalign))) ? "—" : String(s.spk_misalign),
+        spk_rem: (s.spk_rem === undefined || Number.isNaN(Number(s.spk_rem))) ? "—" : String(s.spk_rem),
+        spk_half: (s.spk_half === undefined || Number.isNaN(Number(s.spk_half))) ? "—" : String(s.spk_half),
+        spk_swap: s.spk_swap === undefined ? "—" : (Number(s.spk_swap) ? "1" : "0"),
+        spk_l: (s.spk_l === undefined || Number.isNaN(Number(s.spk_l))) ? "—" : String(s.spk_l),
+        spk_r: (s.spk_r === undefined || Number.isNaN(Number(s.spk_r))) ? "—" : String(s.spk_r)
       };
     }
-    const SNAP_KEYS = ["a2dp", "aacp", "mic", "duck", "ear_l", "ear_r", "ear", "owns", "reclaim", "paused", "spk", "usbstream", "peer", "addr", "vol", "mute", "last19", "name", "gain", "noise", "ca", "dec_err"];
+    const SNAP_KEYS = ["a2dp", "aacp", "mic", "duck", "ear_l", "ear_r", "ear", "owns", "reclaim", "paused", "spk", "usbstream", "peer", "addr", "vol", "mute", "last19", "name", "gain", "noise", "ca", "dec_err", "spk_misalign", "spk_rem", "spk_half", "spk_swap", "spk_l", "spk_r"];
     function formatSnap(snap) {
       return SNAP_KEYS.map((k) => k + "=" + snap[k]).join(" ");
     }
@@ -2279,6 +2328,7 @@
       setText("micStreamState", stream);
       paintOutputActivity();
       paintDualStrip();
+      paintBalanceStrip();
       const cdcNote = cdcAttached ? " · CDC console" : "";
       setText("diagMeta", stream + " · speaker " + (spkTest.running ? "test" : "idle") + cdcNote);
     }
@@ -2307,6 +2357,91 @@
         chip("Peer 0x0E", peer, peer && peer !== "—" ? "warn" : "idle"),
         chip("CDC", cdcAttached ? "console" : "off", cdcAttached ? "ok" : "idle")
       ].join("");
+    }
+    function earCupOn(v) {
+      return !unk(v) && Number(v) === 0;
+    }
+    function earCupOff(v) {
+      return !unk(v) && Number(v) !== 0;
+    }
+    function earCupLabel(v) {
+      if (unk(v)) return "—";
+      return Number(v) === 0 ? "on" : "off";
+    }
+    function dbfsLabel(v) {
+      if (v === undefined || v === "" || v === null || Number.isNaN(Number(v))) return null;
+      return Number(v);
+    }
+    function paintBalanceDb(fillId, dbId, db) {
+      const fill = $(fillId);
+      const lab = $(dbId);
+      if (db === null) {
+        if (fill) {
+          fill.style.width = "0%";
+          fill.classList.remove("hot");
+        }
+        if (lab) lab.textContent = "— dBFS";
+        return;
+      }
+      const pct = dbPct(db);
+      if (fill) {
+        fill.style.width = pct + "%";
+        fill.classList.toggle("hot", db >= -6);
+      }
+      if (lab) lab.textContent = db <= -96 ? "−∞ dBFS" : (db + " dBFS");
+    }
+    function paintBalanceStrip() {
+      const el = $("balanceChips");
+      const warn = $("balanceWarn");
+      const strip = $("balanceStrip");
+      const src = $("balanceSrc");
+      if (!el) return;
+      const s = currentStatus;
+      const earL = s ? earCupLabel(s.ear_l) : "—";
+      const earR = s ? earCupLabel(s.ear_r) : "—";
+      const mis = s && s.spk_misalign !== undefined && !Number.isNaN(Number(s.spk_misalign)) ? Number(s.spk_misalign) : null;
+      const rem = s && s.spk_rem !== undefined && !Number.isNaN(Number(s.spk_rem)) ? Number(s.spk_rem) : null;
+      const half = s && s.spk_half !== undefined && !Number.isNaN(Number(s.spk_half)) ? Number(s.spk_half) : null;
+      const swap = s && s.spk_swap !== undefined ? Number(s.spk_swap) : null;
+      const lDb = s ? dbfsLabel(s.spk_l) : null;
+      const rDb = s ? dbfsLabel(s.spk_r) : null;
+      let climbing = false;
+      if (mis !== null) {
+        if (lastSpkMisalign !== null && mis > lastSpkMisalign) climbing = true;
+        lastSpkMisalign = mis;
+      }
+      const warns = [];
+      if (s && earCupOn(s.ear_l) && earCupOff(s.ear_r)) warns.push("Ear R off while L on — one cup off-head can feel left-weighted.");
+      if (s && earCupOn(s.ear_r) && earCupOff(s.ear_l)) warns.push("Ear L off while R on — one cup off-head can feel right-weighted.");
+      if (climbing) warns.push("spk_misalign climbing — USB ISO leftovers (not 4-byte frames).");
+      if (swap === 1 || rem === 2) warns.push("spk_rem=2 / spk_swap — one-channel sticky remainder (classic L/R swap size).");
+      if (lDb !== null && rDb !== null && lDb >= -50 && rDb >= -50 && Math.abs(lDb - rDb) >= 6) {
+        const side = lDb > rDb ? "left" : "right";
+        warns.push("|L−R| USB PCM gap " + Math.abs(lDb - rDb) + " dB (" + side + "-weighted host mix).");
+      }
+      if (!cdcAttached && connectedKind) warns.push("CDC console off — USB L/R dBFS and spk_misalign need @STATUS. Ear chips still come from HID.");
+      const misCls = climbing ? "bad" : (mis > 0 ? "warn" : (mis === 0 ? "ok" : "idle"));
+      el.innerHTML = [
+        chip("Ear L", earL, earL === "off" ? "warn" : (earL === "on" ? "ok" : "idle")),
+        chip("Ear R", earR, earR === "off" ? "warn" : (earR === "on" ? "ok" : "idle")),
+        chip("spk_misalign", mis === null ? "—" : String(mis), misCls),
+        chip("spk_rem", rem === null ? "—" : String(rem), rem === 2 ? "warn" : "idle"),
+        chip("spk_half", half === null ? "—" : String(half), half > 0 ? "warn" : "idle"),
+        chip("spk_swap", swap === null ? "—" : String(swap), swap === 1 ? "bad" : "idle"),
+        chip("CDC", cdcAttached ? "console" : "needed", cdcAttached ? "ok" : "warn")
+      ].join("");
+      paintBalanceDb("balLFill", "balLDb", lDb);
+      paintBalanceDb("balRFill", "balRDb", rDb);
+      if (src) {
+        src.textContent = cdcAttached
+          ? "USB L/R are integer dBFS RMS of dongle speaker PCM (after frame-align, ~100 ms window). 0 = full-scale, −96 = silence. Ear sensors are AACP 0x0006 (0 = on-head). Not Teams/YouTube PCM. Cross-correlation lag is not measured."
+          : "L/R USB PCM levels are serial-only (@STATUS spk_l= spk_r=). Connect HID, then CDC console. Ear L/R already come from HID. Cross-correlation lag is not measured (deferred — Pico CPU).";
+      }
+      if (warn) {
+        warn.textContent = warns.join(" ");
+        warn.classList.toggle("show", warns.length > 0);
+      }
+      if (strip) strip.classList.toggle("balance-alert", warns.length > 0 && (climbing || swap === 1 || rem === 2 || (lDb !== null && rDb !== null && Math.abs(lDb - rDb) >= 6 && lDb >= -50 && rDb >= -50) || (s && ((earCupOn(s.ear_l) && earCupOff(s.ear_r)) || (earCupOn(s.ear_r) && earCupOff(s.ear_l))))));
     }
     function pill(k, v, cls) {
       return '<span class="out-pill ' + (cls || "") + '"><span class="k">' + k + '</span><span class="v">' + v + "</span></span>";
@@ -2343,6 +2478,9 @@
         " owns=" + (s ? s.owns : "—") +
         " reclaim=" + (s ? s.reclaim : "—") +
         " paused=" + (s ? s.paused : "—") +
+        " spk_misalign=" + (s && s.spk_misalign !== undefined ? s.spk_misalign : "—") +
+        " spk_l=" + (s && s.spk_l !== undefined ? s.spk_l : "—") +
+        " spk_r=" + (s && s.spk_r !== undefined ? s.spk_r : "—") +
         " cdc=" + (cdcAttached ? "on" : "off") +
         " speaker_test=" + (spkTest.running ? "on" : "off"), "heart");
     }
@@ -2445,7 +2583,13 @@
     }
 
     function applyStatus(s) {
-      if (currentStatus && s.peer === undefined) s.peer = currentStatus.peer;
+      if (currentStatus) {
+        const keep = ["peer", "vol", "spk_l", "spk_r", "spk_misalign", "spk_rem", "spk_half", "spk_swap", "name", "model", "serial", "fw"];
+        for (let i = 0; i < keep.length; i++) {
+          const k = keep[i];
+          if (s[k] === undefined) s[k] = currentStatus[k];
+        }
+      }
       const ear = earLabel(s.ear_l, s.ear_r);
       $("stEar").textContent = ear;
       setCrown(s);
@@ -2580,7 +2724,13 @@
         usbstream: kv.stream !== undefined ? kv.stream === "1" : undefined,
         peer: kv.peer && kv.peer !== "-" ? kv.peer : undefined,
         model: kv.model, serial: kv.serial, fw: kv.fw,
-        mute: kv.mute, dec_err: kv.dec_err
+        mute: kv.mute, dec_err: kv.dec_err,
+        spk_misalign: kv.spk_misalign !== undefined ? Number(kv.spk_misalign) : undefined,
+        spk_rem: kv.spk_rem !== undefined ? Number(kv.spk_rem) : undefined,
+        spk_half: kv.spk_half !== undefined ? Number(kv.spk_half) : undefined,
+        spk_swap: kv.spk_swap !== undefined ? Number(kv.spk_swap) : undefined,
+        spk_l: kv.spk_l !== undefined ? Number(kv.spk_l) : undefined,
+        spk_r: kv.spk_r !== undefined ? Number(kv.spk_r) : undefined
       });
     }
 
@@ -2640,6 +2790,7 @@
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
       if (cdcStatusTimer) { clearInterval(cdcStatusTimer); cdcStatusTimer = null; }
       lastRawStatus = "";
+      lastSpkMisalign = null;
       cdcAttached = false;
       serialBuf = "";
       paintCdcButton();
@@ -2689,7 +2840,7 @@
 
     async function sendSerial(line) {
       if (!serialWriter) return;
-      await serialWriter.write(line + "\n");
+      await serialWriter.write(serialEnc.encode(line + "\n"));
     }
 
     async function sendCmd(cmd, arg, serialLine) {

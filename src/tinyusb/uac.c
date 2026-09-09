@@ -31,6 +31,7 @@
  #include "usb_descriptors.h"
  #include "debug_cdc.h"
  #include "spk_frame_align.h"
+#include "spk_level_meter.h"
 
  #include "../btstack/btstack_avdtp_source.h"
  #include "../btstack/aacp_mic_dec.h"
@@ -125,16 +126,39 @@ int16_t volume[CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX + 1];    // +1 for master chan
  // Speaker data size received in the last frame
  int spk_data_size;
  static spk_frame_align_t spk_align;
+ static spk_level_meter_t spk_meter = {
+   .window_n = SPK_LEVEL_WINDOW_N,
+   .dbfs_l = SPK_DBFS_SILENCE,
+   .dbfs_r = SPK_DBFS_SILENCE,
+ };
  static uint32_t spk_misalign_last_log;
 
  static void spk_stream_reset(void) {
    spk_data_size = 0;
    spk_frame_align_reset(&spk_align);
+   spk_level_meter_init(&spk_meter, SPK_LEVEL_WINDOW_N);
    audio_slot_reset_filling();
  }
 
  uint32_t usb_spk_misalign_count(void) {
    return spk_align.misalign;
+ }
+
+ uint8_t usb_spk_rem_len(void) {
+   return spk_align.rem_len;
+ }
+
+ uint32_t usb_spk_half_count(void) {
+   return spk_align.half;
+ }
+
+ uint8_t usb_spk_swap_suspect(void) {
+   return (uint8_t)spk_swap_suspect(spk_align.rem_len);
+ }
+
+ void usb_spk_levels_dbfs(int8_t *l, int8_t *r) {
+   if (l) *l = spk_meter.dbfs_l;
+   if (r) *r = spk_meter.dbfs_r;
  }
  // Resolution per format
  const uint8_t resolutions_per_format[CFG_TUD_AUDIO_FUNC_1_N_FORMATS] = {CFG_TUD_AUDIO_FUNC_1_FORMAT_1_RESOLUTION_RX,
@@ -152,6 +176,7 @@ int16_t volume[CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX + 1];    // +1 for master chan
 
 
   flash_safe_execute_core_init();
+  spk_level_meter_init(&spk_meter, SPK_LEVEL_WINDOW_N);
 
   //board_init();
  
@@ -631,6 +656,9 @@ void tinyusb_control_task(void){
 
       if (sample_count) {
         int16_t *src = (int16_t *)bytes;
+
+        // USB speaker PCM after frame-align, before CA duck / A2DP encode.
+        spk_level_meter_ingest(&spk_meter, src, sample_count);
 
         // Conversation Awareness speaking ducks A2DP out only — never the mic.
         uint8_t duck = aacp_get_ca_duck_q8();
