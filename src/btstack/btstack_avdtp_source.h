@@ -69,6 +69,10 @@ void avdtp_dual_connect_note_they_own(void);
 // Post-reclaim HID Play / media start gate (we_paused_for_steal).
 bool avdtp_allow_play_after_reclaim(void);
 
+// UAC task: consume latched speaker unmute / iso nudge after reclaim wake.
+bool avdtp_host_wake_take_unmute(void);
+bool avdtp_host_wake_take_iso_nudge(void);
+
 void gap_start_scanning(void);
 
 bool get_a2dp_connected_flag();

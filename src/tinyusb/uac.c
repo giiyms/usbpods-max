@@ -730,5 +730,36 @@ void audio_control_task(void)
     uac_note_bt_vol_published(volume[0]);
     need_change_bt_volume = false;
    }
+
+   // One interrupt per tick (TinyUSB INT EP is shallow). Unmute first;
+   // iso nudge is the existing volume-interrupt pattern plus local reset
+   // (same as alt-set). Device cannot SET_INTERFACE.
+   if (avdtp_host_wake_take_unmute()) {
+     for (uint8_t i = 0; i < CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX + 1; i++) {
+       mute[i] = 0;
+     }
+     const audio_interrupt_data_t mute_int = {
+       .bInfo = 0,
+       .bAttribute = AUDIO_CS_REQ_CUR,
+       .wValue_cn_or_mcn = 0,
+       .wValue_cs = AUDIO_FU_CTRL_MUTE,
+       .wIndex_ep_or_int = 0,
+       .wIndex_entity_id = UAC2_ENTITY_SPK_FEATURE_UNIT,
+     };
+     tud_audio_int_write(&mute_int);
+     printf("[USB] speaker FU unmute interrupt (host session wake)\n");
+   } else if (avdtp_host_wake_take_iso_nudge()) {
+     spk_stream_reset();
+     const audio_interrupt_data_t vol_int = {
+       .bInfo = 0,
+       .bAttribute = AUDIO_CS_REQ_CUR,
+       .wValue_cn_or_mcn = 0,
+       .wValue_cs = AUDIO_FU_CTRL_VOLUME,
+       .wIndex_ep_or_int = 0,
+       .wIndex_entity_id = UAC2_ENTITY_SPK_FEATURE_UNIT,
+     };
+     tud_audio_int_write(&vol_int);
+     printf("[USB] speaker iso nudge (local reset + volume interrupt)\n");
+   }
   }
  

@@ -54,9 +54,11 @@
 #include "btstack_aacp.h"
 #include "avdtp_reclaim.h"
 #include "dual_connect_policy.h"
+#include "host_session_wake.h"
 #include "classic/device_id_server.h"
 
 #include "../pico_w_led.h"
+#include "../hid_consumer.h"
 
 #define HAVE_AAC_FDK
 
@@ -472,6 +474,75 @@ static bool usb_spk_open = false;
 static bool we_paused_after_giveup = false;
 static bool we_paused_for_steal    = false;
 
+static host_wake_t host_wake;
+static btstack_timer_source_t host_wake_timer;
+static volatile bool host_wake_unmute_req    = false;
+static volatile bool host_wake_iso_nudge_req = false;
+
+static void host_wake_timer_handler(btstack_timer_source_t *timer);
+
+bool avdtp_host_wake_take_unmute(void) {
+    if (!host_wake_unmute_req) return false;
+    host_wake_unmute_req = false;
+    return true;
+}
+
+bool avdtp_host_wake_take_iso_nudge(void) {
+    if (!host_wake_iso_nudge_req) return false;
+    host_wake_iso_nudge_req = false;
+    return true;
+}
+
+static void host_wake_apply_acts(uint8_t acts) {
+    if (acts & HOST_WAKE_ACT_UNMUTE) {
+        host_wake_unmute_req = true;
+        printf("[A2DP] host session wake → UAC speaker unmute\n");
+    }
+    if (acts & HOST_WAKE_ACT_PLAY) {
+        (void) avdtp_allow_play_after_reclaim(); /* consume we_paused_for_steal once */
+        hid_consumer_play();
+        printf("[A2DP] host session wake → HID Play (%u/%u)\n",
+               (unsigned) host_wake.plays_sent, (unsigned) HOST_WAKE_MAX_PLAYS);
+    }
+    if (acts & HOST_WAKE_ACT_ISO_NUDGE) {
+        host_wake_iso_nudge_req = true;
+        printf("[A2DP] host session wake → speaker iso nudge\n");
+    }
+}
+
+static void host_wake_timer_rearm(void) {
+    uint32_t now = btstack_run_loop_get_time_ms();
+    uint32_t d = host_wake_next_delay_ms(&host_wake, now);
+    btstack_run_loop_remove_timer(&host_wake_timer);
+    if (d == 0) return;
+    btstack_run_loop_set_timer_handler(&host_wake_timer, host_wake_timer_handler);
+    btstack_run_loop_set_timer(&host_wake_timer, d);
+    btstack_run_loop_add_timer(&host_wake_timer);
+}
+
+static void host_wake_timer_handler(btstack_timer_source_t *timer) {
+    (void)timer;
+    uint32_t now = btstack_run_loop_get_time_ms();
+    uint8_t acts = host_wake_poll(&host_wake, now, usb_spk_open, is_usb_streaming);
+    host_wake_apply_acts(acts);
+    host_wake_timer_rearm();
+}
+
+static void host_wake_stop(void) {
+    host_wake_cancel(&host_wake);
+    btstack_run_loop_remove_timer(&host_wake_timer);
+}
+
+static void host_wake_begin_after_stream(void) {
+    uint32_t now = btstack_run_loop_get_time_ms();
+    uint8_t acts = host_wake_arm(&host_wake, now, we_paused_for_steal, is_streaming);
+    if (acts == HOST_WAKE_ACT_NONE && host_wake.phase == HOST_WAKE_IDLE) return;
+    printf("[A2DP] reclaim stream → host session wake (Play in %u ms)\n",
+           (unsigned) HOST_WAKE_PLAY_DELAY_MS);
+    host_wake_apply_acts(acts);
+    host_wake_timer_rearm();
+}
+
 void avdtp_set_usb_speaker_open(bool open) {
     /* Explicit USB speaker alt!=0 clears give-up hold so a real user sink
      * request can reclaim again (not an auto-resume ping-pong). */
@@ -557,6 +628,7 @@ static void reclaim_timer_handler(btstack_timer_source_t *timer) {
         reclaim_connect_pending = false;
         we_paused_after_giveup = true;
         we_paused_for_steal = false;
+        host_wake_stop();
         btstack_run_loop_remove_timer(&reclaim_timer);
         return;
     }
@@ -603,6 +675,7 @@ void avdtp_dual_connect_note_they_own(void) {
     reclaim_drop_issued = false;
     we_paused_after_giveup = true;
     we_paused_for_steal = false;
+    host_wake_stop();
     a2dp_demo_timer_stop(&media_tracker);
     is_streaming = false;
     btstack_run_loop_remove_timer(&reclaim_timer);
@@ -611,7 +684,7 @@ void avdtp_dual_connect_note_they_own(void) {
 bool avdtp_allow_play_after_reclaim(void) {
     bool ok = dual_connect_allow_play_after_reclaim(we_paused_for_steal);
     if (ok) {
-        we_paused_for_steal = false; /* consume once */
+        we_paused_for_steal = false; /* consume once — HID Play in host_wake */
     }
     return ok;
 }
@@ -624,6 +697,7 @@ void avdtp_reclaim_hold_set(bool hold) {
         reclaim_connect_pending = false;
         reclaim_drop_issued = false;
         we_paused_for_steal = false;
+        host_wake_stop();
         btstack_run_loop_remove_timer(&reclaim_timer);
     }
 }
@@ -655,6 +729,11 @@ static void avdtp_reclaim_after_steal(void) {
     }
     reclaim_steal = true;
     we_paused_for_steal = true;
+    host_wake_stop();
+    if (dual_connect_usb_wants_sink(usb_spk_open, is_usb_streaming)) {
+        hid_consumer_pause();
+        printf("[A2DP] steal → HID Pause (host session)\n");
+    }
     aacp_reassert_ownership();
     a2dp_demo_timer_stop(&media_tracker);
     is_streaming = false;
@@ -1980,6 +2059,7 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
                         a2dp_demo_timer_start(&media_tracker);
                         is_streaming = true;
                         start_led_blink();
+                        host_wake_begin_after_stream();
                     }
                     break;
                 case AVDTP_SI_SUSPEND: {
@@ -2063,6 +2143,7 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
             printf("Streaming connection released.\n");
             set_led_mode_off();
             is_streaming = false;
+            host_wake_stop();
             if (!reclaim_hold && a2dp_is_connected_flag &&
                 dual_connect_should_reclaim_on_steal(
                     usb_spk_open, is_usb_streaming, we_paused_after_giveup)) {
@@ -2082,6 +2163,7 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
             aacp_disconnect();
             printf("Signaling connection released.\n");
             reclaim_drop_issued = false;
+            host_wake_stop();
             reclaim_arm_after_release();
             break;
         default:
