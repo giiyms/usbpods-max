@@ -117,8 +117,87 @@ int main(void) {
 
     // 10) 0x10 smart-routing: see tests/aacp_smart_routing_test.c
 
+    // 11) AACP 0x11 SetOwnershipToFalse — pause + we_paused; no hijack burst
+    {
+        static const char *k_false = "audioRoutingSetOwnershipToFalse";
+        uint8_t pkt[80];
+        memset(pkt, 0, sizeof pkt);
+        pkt[0] = 0x04; pkt[1] = 0x00; pkt[2] = 0x04; pkt[3] = 0x00;
+        pkt[4] = DUAL_SR_RESP_OPCODE; pkt[5] = 0x00;
+        // Display MAC AA:BB:CC:DD:EE:FF → packet bytes FF EE DD CC BB AA
+        pkt[6] = 0xFF; pkt[7] = 0xEE; pkt[8] = 0xDD;
+        pkt[9] = 0xCC; pkt[10] = 0xBB; pkt[11] = 0xAA;
+        memcpy(pkt + 12, k_false, 31);
+        size_t plen = 12 + 31;
+
+        EQ(dual_connect_0x11_is_ownership_false(pkt, plen), 1, "0x11 own-false");
+        EQ(dual_connect_0x11_is_reverse_banner(pkt, plen), 0, "0x11 no reverse");
+        {
+            uint8_t sender[6];
+            EQ(dual_connect_parse_0x11_sender(pkt, plen, sender), 1, "0x11 sender ok");
+            static const uint8_t peer[6] = { 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF };
+            EQS(sender, peer, 6, "0x11 MAC reversed");
+        }
+
+        dual_connect_0x11_decision_t d =
+            dual_connect_decide_0x11(pkt, plen, true, true);
+        EQ(d.recognized, 1, "0x11 recognized");
+        EQ(d.pause_media, 1, "0x11 pause while USB wants sink");
+        EQ(d.set_we_paused, 1, "0x11 we_paused (anti-ping-pong)");
+        EQ(d.send_owns_giveup, 1, "0x11 OWNS=00");
+        EQ(d.send_hijack, 0, "0x11 no immediate 0x10 hijack");
+        EQ(d.state, DUAL_THEY_OWN, "0x11 → THEY_OWN");
+
+        // Reclaim gated while we_paused; 0x10 hijack shares the same gate.
+        EQ(dual_connect_should_reclaim_on_steal(true, true, d.set_we_paused), 0,
+           "0x11 reclaim gated");
+        EQ(dual_connect_anti_ping_pong_blocks_reclaim(d.set_we_paused), 1,
+           "0x11 anti-ping-pong armed");
+
+        // USB idle: still give up / we_paused, but no HID Pause.
+        dual_connect_0x11_decision_t idle =
+            dual_connect_decide_0x11(pkt, plen, false, false);
+        EQ(idle.recognized, 1, "0x11 idle recognized");
+        EQ(idle.pause_media, 0, "0x11 USB idle → no HID pause");
+        EQ(idle.set_we_paused, 1, "0x11 idle still we_paused");
+        EQ(idle.state, DUAL_THEY_OWN, "0x11 idle → THEY_OWN");
+        EQ(dual_connect_should_reclaim_on_steal(false, false, idle.set_we_paused),
+           0, "0x11 idle no reclaim");
+
+        // Anti-ping-pong clears on USB streaming rising edge, then reclaim ok.
+        EQ(dual_connect_should_clear_anti_ping_pong(true, true, false), 1,
+           "clear on USB streaming 0→1");
+        EQ(dual_connect_should_clear_anti_ping_pong(true, false, true), 1,
+           "clear on USB speaker 0→1");
+        EQ(dual_connect_should_clear_anti_ping_pong(true, false, false), 0,
+           "idle open alt-set does not clear");
+        EQ(dual_connect_should_clear_anti_ping_pong(false, true, true), 0,
+           "nothing to clear");
+        EQ(dual_connect_should_reclaim_on_steal(true, true, false), 1,
+           "reclaim after anti-ping-pong clears");
+
+        // ReverseBannerTapped: still give-up, no hijack (no reverse UI).
+        memcpy(pkt + 12 + 31, DUAL_0X11_REVERSE_BANNER_KEY, 19);
+        size_t rlen = plen + 19;
+        EQ(dual_connect_0x11_is_reverse_banner(pkt, rlen), 1, "0x11 reverse");
+        dual_connect_0x11_decision_t rev =
+            dual_connect_decide_0x11(pkt, rlen, true, false);
+        EQ(rev.reverse_banner, 1, "0x11 reverse flag");
+        EQ(rev.send_hijack, 0, "0x11 reverse still no hijack");
+        EQ(rev.state, DUAL_THEY_OWN, "0x11 reverse → THEY_OWN");
+
+        // 0x10 hijack TX (same string, wrong opcode) is not 0x11 RX.
+        pkt[4] = 0x10;
+        EQ(dual_connect_0x11_is_ownership_false(pkt, rlen), 0, "0x10 ≠ 0x11");
+        dual_connect_0x11_decision_t not11 =
+            dual_connect_decide_0x11(pkt, rlen, true, true);
+        EQ(not11.recognized, 0, "0x10 packet not ownership-false RX");
+        EQ(not11.send_hijack, 0, "unrecognized 0x11 path does not hijack");
+    }
+
     printf("dual_connect_policy_test: PASS "
            "(idle, steal→claim, status129, owns00, 0x0E, anti-ping-pong, "
-           "play-gate, 0x2E, OWNS+0x20; 0x10 in aacp_smart_routing_test)\n");
+           "play-gate, 0x2E, OWNS+0x20, 0x11 SetOwnershipToFalse; "
+           "0x10 in aacp_smart_routing_test)\n");
     return 0;
 }

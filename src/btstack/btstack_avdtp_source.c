@@ -475,8 +475,10 @@ static bool we_paused_for_steal    = false;
 void avdtp_set_usb_speaker_open(bool open) {
     /* Explicit USB speaker alt!=0 clears give-up hold so a real user sink
      * request can reclaim again (not an auto-resume ping-pong). */
-    if (open && !usb_spk_open) {
+    if (dual_connect_should_clear_anti_ping_pong(we_paused_after_giveup,
+                                                false, open && !usb_spk_open)) {
         we_paused_after_giveup = false;
+        printf("[A2DP] anti-ping-pong clear (USB speaker open after give-up)\n");
     }
     usb_spk_open = open;
 }
@@ -597,6 +599,8 @@ void avdtp_dual_connect_note_they_own(void) {
     reclaim_drop_issued = false;
     we_paused_after_giveup = true;
     we_paused_for_steal = false;
+    a2dp_demo_timer_stop(&media_tracker);
+    is_streaming = false;
     btstack_run_loop_remove_timer(&reclaim_timer);
 }
 
@@ -887,6 +891,13 @@ bool check_is_streaming(){
 }
 
 void set_usb_streaming(bool flag){
+    /* 0x11 / give-up: HID Pause drops USB PCM; user Play raises it again. */
+    if (dual_connect_should_clear_anti_ping_pong(we_paused_after_giveup,
+                                                flag && !is_usb_streaming,
+                                                false)) {
+        we_paused_after_giveup = false;
+        printf("[A2DP] anti-ping-pong clear (USB streaming again after give-up)\n");
+    }
     is_usb_streaming = flag;
 }
 
@@ -2931,7 +2942,9 @@ int btstack_main(int argc, const char * argv[]){
     sdp_init();
 
     // Device ID (DID) record advertising Apple as the vendor (0x004C). Several
-    // AACP features are gated on the host's DID VendorID being Apple.
+    // AACP features (including 0x10 Tipi) are gated on the host's DID VendorID
+    // being Apple. Tuple matches LibrePods linux `DeviceID = bluetooth:004C:0000:0000`
+    // — do not invent product/version. See AACP-FEATURES.md DID audit.
     static uint8_t sdp_device_id_service_buffer[100];
     memset(sdp_device_id_service_buffer, 0, sizeof(sdp_device_id_service_buffer));
     device_id_create_sdp_record(sdp_device_id_service_buffer, 0x10005,

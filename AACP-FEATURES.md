@@ -48,7 +48,7 @@ Handshake replay runs after handshake + `0x004D` + `0x000F` on **every new AACP 
 | Device info | `0x001D` | parsed | Unsolicited host-only; do not request. Null-terminated strings: name, model, manufacturer, serial, fw. |
 | Audio source req/resp | `0x000D` / `0x000E` | dumped + parsed | Android parses `0x0E` MAC+type. Hijack TX is separate `0x10` (below). USB speaker alt≠0 still `control_request_reconnect()` for A2DP. |
 | Connected devices | `0x002D` / `0x002E` | parsed + TX | LibrePods list of connected devices. New peer ≠ self → `createMediaInformationNewDevicePacket` + `createAddTiPiDevicePacket` (verbatim). |
-| Smart routing | `0x0010` / `0x0011` | implemented (TX) + dumped (RX) | Verbatim LibrePods `AACPManager.kt` builders (`aacp_smart_routing.h`). takeOver order after OWNS: media_info + showUI + hijack. **DID caveat:** may no-op without Apple Device ID acceptance (LibrePods vendor-id hook). btName=`Android`. |
+| Smart routing | `0x0010` / `0x0011` | implemented (TX 0x10) + parsed (RX 0x11) | Verbatim LibrePods `AACPManager.kt` builders (`aacp_smart_routing.h`). takeOver order after OWNS: media_info + showUI + hijack. **RX `0x0011` SetOwnershipToFalse** (LibrePods `onOwnershipToFalseRequest`): HID Pause if USB wants sink, OWNS=`00`, `we_paused_after_giveup`, state THEY_OWN — **no immediate OWNS claim / 0x10 burst**. ReverseBannerTapped parsed, no reverse UI. **DID caveat:** may no-op without Apple Device ID acceptance (LibrePods vendor-id hook). btName=`Android`. |
 | Rename | opcode **`0x001A`** | implemented | Docs `opcodes.md` lists `0x001E` but that id is AutoAnswer. LibrePods send path: `04 00 04 00 1A 00 01 [size] 00 [name]`. CDC `rename <str>` + WebHID cmd `0x0F`. |
 | Hearing aid `0x2C/0x33/0x3D` | — | skipped | user: not Max 2 scope |
 | HRM `0x30` | — | skipped | |
@@ -70,9 +70,27 @@ Host-side policy (`src/btstack/dual_connect_policy.h`, `src/btstack/aacp_smart_r
 - States: USB_IDLE / WE_OWN_STREAMING / THEY_OWN / RECLAIMING / GIVE_UP.
 - Reclaim on unexpected pause / START reject only when USB wants the sink.
 - OWNS claim/give-up exact frames; parse `0x0E` (MAC reversed + type) and `0x2E` (count + 8-byte records) per LibrePods `AACPManager`.
-- Anti-ping-pong ([librepods#724](https://github.com/librepods-org/librepods/pull/724)): after give-up (`owns=00` / peer playing), auto-resume must not reclaim until explicit USB speaker open.
+- Anti-ping-pong ([librepods#724](https://github.com/librepods-org/librepods/pull/724)): after give-up (`owns=00` / peer playing / **0x11 SetOwnershipToFalse**), auto-resume must not reclaim until USB PCM streaming 0→1 (host Play) or USB speaker alt 0→1. Idle open alt-set does not clear.
 - Post-reclaim Play gated on `we_paused_for_steal`. Stop reclaim if OWNS stays `00`.
 - **`0x10` smart-routing hijack implemented** (verbatim LibrePods Android builders; USB_IDLE → no send; reclaim path after OWNS).
+- **`0x11` SetOwnershipToFalse implemented** (LibrePods `AACPManager` substring parse + `AirPodsService.onOwnershipToFalseRequest`): pause + `we_paused_after_giveup`; reclaim/hijack gated until anti-ping-pong clears.
+
+## DID / advertising vs LibrePods Tipi (0x10 acceptance)
+
+LibrePods: AirPods gate several AACP features (including smart-routing / Tipi `0x10`) on the **host Device ID (DID) VendorID being Apple**. Linux: `DeviceID = bluetooth:004C:0000:0000` in `/etc/bluetooth/main.conf`. Android: Xposed “act as Apple device”. Without that acceptance, earbuds may **ignore `0x10`** even when packets are sent.
+
+USBPods Max already advertises the same Bluetooth DID tuple — **no DID code change in this work** (would be inventing product IDs):
+
+| Field | USBPods Max | LibrePods Linux (`bluetooth:004C:0000:0000`) |
+|-------|-------------|-----------------------------------------------|
+| SDP Device ID | `device_id_create_sdp_record(..., DEVICE_ID_VENDOR_ID_SOURCE_BLUETOOTH, 0x004C, 0x0000, 0x0000)` in `btstack_avdtp_source.c` | vendor source Bluetooth, vendor `004C`, product `0000`, version `0000` |
+| A2DP AAC-ELD vendor | Apple `0x004C` / codec `0x8001` | same vendor ID (codec path, not DID) |
+| GAP name | `Pico USB Audio` | phone name; independent of Tipi |
+| Tipi `btName` in `0x10` | `"Android"` (LibrePods phone-path builders) | `"Android"` on the Android send path |
+| Discoverable / EIR | `gap_discoverable_control(0)`; CoD `0x200408` | N/A (host stack) |
+| BLE Apple company ID | not advertised (Classic A2DP+AACP dongle) | not required for Classic DID |
+
+**Gaps (docs only — do not invent):** we do not emit a fake Apple product/version other than the documented `0000:0000`; there is no USB-source DID (`usb:…`); Pico cannot run the Android Xposed hook. Re-pair after flash so the Max pick up the SDP DID (`BOOTSEL` long-press). Even with this record, earbuds may still ignore `0x10` if they do not accept a non-Apple radio as an Apple DID host.
 
 ## HID
 

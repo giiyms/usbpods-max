@@ -165,6 +165,8 @@ int main(void) {
     EQ(aacp_sr_should_send_hijack(false, true, false), 1, "USB streaming → hijack");
     EQ(aacp_sr_should_send_hijack(true, true, true), 0, "anti-ping-pong blocks");
     EQ(dual_connect_should_reclaim_on_steal(true, false, false), 1, "reclaim path still on");
+    /* 0x11 SetOwnershipToFalse sets we_paused_after_giveup — same gate. */
+    EQ(aacp_sr_should_send_hijack(true, true, true), 0, "0x11 we_paused blocks 0x10");
 
     /* 6) Reclaim path builders non-empty / correct opcode */
     {

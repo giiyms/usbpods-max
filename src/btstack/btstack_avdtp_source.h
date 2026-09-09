@@ -61,7 +61,8 @@ void avdtp_disconnect_keep_pairing(void);
 // Drop A2DP without wiping the slot. Hold auto-reclaim (explicit disconnect / pair).
 void avdtp_reclaim_hold_set(bool hold);
 
-// Peer owns A2DP (0x0E MEDIA/CALL or owns=00). Arms anti-ping-pong.
+// Peer owns A2DP (0x0E MEDIA/CALL, owns=00, or 0x11 SetOwnershipToFalse).
+// Arms anti-ping-pong (we_paused_after_giveup) and stops the A2DP send timer.
 void avdtp_dual_connect_note_they_own(void);
 
 // Post-reclaim HID Play / media start gate (we_paused_for_steal).

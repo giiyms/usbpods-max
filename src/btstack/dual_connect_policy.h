@@ -2,9 +2,10 @@
 //
 // Dual-connect A2DP ownership policy (host-side, pure helpers).
 // LibrePods: 0x06 OWNS, 0x20 autocon, 0x0E audio source, 0x2E connected
-// devices. Anti-ping-pong: librepods-org#724 (i_paused_the_media — auto-resume
-// after give-up must not reclaim). 0x10 smart-routing builders live in
-// aacp_smart_routing.h (verbatim LibrePods AACPManager.kt).
+// devices, 0x11 SMART_ROUTING_RESP (SetOwnershipToFalse). Anti-ping-pong:
+// librepods-org#724 (i_paused_the_media — auto-resume after give-up must not
+// reclaim). 0x10 smart-routing builders live in aacp_smart_routing.h
+// (verbatim LibrePods AACPManager.kt). Do not invent opcodes.
 
 #ifndef USBPODS_DUAL_CONNECT_POLICY_H
 #define USBPODS_DUAL_CONNECT_POLICY_H
@@ -38,6 +39,12 @@ typedef enum {
 #define DUAL_CTRL_FRAME_LEN  11u
 #define DUAL_CONN_DEV_REC    8u
 #define DUAL_CONN_DEV_MAX    8u
+
+// LibrePods AACPManager.Opcodes.SMART_ROUTING_RESP — Host RX of 0x10 relay.
+#define DUAL_SR_RESP_OPCODE          0x11u
+// Substring search matches AACPManager.kt packet.decodeToString().contains(...)
+#define DUAL_0X11_OWN_FALSE_KEY      "SetOwnershipToFalse"
+#define DUAL_0X11_REVERSE_BANNER_KEY "ReverseBannerTapped"
 
 typedef struct {
     uint8_t mac[6]; // display order (packet [6..11] reversed)
@@ -121,6 +128,79 @@ static inline int dual_connect_parse_0x2e(const uint8_t *pkt, size_t len,
     return n;
 }
 
+// --- 0x11 SMART_ROUTING_RESP (LibrePods AACPManager.kt) ---
+// sender MAC = packet[6..11] reversed (same as 0x10 TX / 0x0E).
+// SetOwnershipToFalse / ReverseBannerTapped: raw substring on the whole packet.
+
+static inline bool dual_connect_pkt_contains(const uint8_t *pkt, size_t len,
+                                             const char *needle) {
+    if (!pkt || !needle) return false;
+    size_t nlen = strlen(needle);
+    if (nlen == 0u || len < nlen) return false;
+    for (size_t i = 0; i + nlen <= len; i++) {
+        if (memcmp(pkt + i, needle, nlen) == 0) return true;
+    }
+    return false;
+}
+
+static inline bool dual_connect_parse_0x11_sender(const uint8_t *pkt, size_t len,
+                                                  uint8_t mac[6]) {
+    if (!pkt || !mac || len < 12u) return false;
+    if (pkt[4] != DUAL_SR_RESP_OPCODE || pkt[5] != 0x00u) return false;
+    mac[0] = pkt[11];
+    mac[1] = pkt[10];
+    mac[2] = pkt[9];
+    mac[3] = pkt[8];
+    mac[4] = pkt[7];
+    mac[5] = pkt[6];
+    return true;
+}
+
+static inline bool dual_connect_0x11_is_ownership_false(const uint8_t *pkt,
+                                                        size_t len) {
+    if (!pkt || len < 12u) return false;
+    if (pkt[4] != DUAL_SR_RESP_OPCODE || pkt[5] != 0x00u) return false;
+    return dual_connect_pkt_contains(pkt, len, DUAL_0X11_OWN_FALSE_KEY);
+}
+
+static inline bool dual_connect_0x11_is_reverse_banner(const uint8_t *pkt,
+                                                       size_t len) {
+    if (!dual_connect_0x11_is_ownership_false(pkt, len)) return false;
+    return dual_connect_pkt_contains(pkt, len, DUAL_0X11_REVERSE_BANNER_KEY);
+}
+
+// AirPodsService.onOwnershipToFalseRequest: pause media, OWNS=00, disconnect
+// audio; do not hijack back. linux-rust i_paused_the_media / librepods#724.
+typedef struct {
+    bool recognized;          // opcode 0x11 + SetOwnershipToFalse
+    bool reverse_banner;      // ReverseBannerTapped (no USBPods reverse UI)
+    bool pause_media;         // HID Pause when USB wants the sink
+    bool set_we_paused;       // anti-ping-pong (we_paused_after_giveup)
+    bool send_owns_giveup;    // control 0x06 = 00 (LibrePods)
+    bool send_hijack;         // always false — no immediate 0x10 / OWNS claim
+    dual_connect_state_t state;
+} dual_connect_0x11_decision_t;
+
+static inline dual_connect_0x11_decision_t dual_connect_decide_0x11(
+        const uint8_t *pkt, size_t len,
+        bool usb_spk_open, bool is_usb_streaming) {
+    dual_connect_0x11_decision_t d;
+    memset(&d, 0, sizeof(d));
+    d.state = DUAL_USB_IDLE;
+    d.send_hijack = false;
+    if (!dual_connect_0x11_is_ownership_false(pkt, len)) {
+        return d;
+    }
+    d.recognized = true;
+    d.reverse_banner = dual_connect_0x11_is_reverse_banner(pkt, len);
+    d.pause_media = usb_spk_open || is_usb_streaming;
+    d.set_we_paused = true;
+    d.send_owns_giveup = true;
+    d.send_hijack = false;
+    d.state = DUAL_THEY_OWN;
+    return d;
+}
+
 // --- Policy decisions ---
 
 static inline bool dual_connect_usb_wants_sink(bool usb_spk_open, bool is_usb_streaming) {
@@ -171,6 +251,17 @@ static inline dual_connect_state_t dual_connect_state_on_unexpected_pause(
         return we_paused_after_giveup ? DUAL_GIVE_UP : DUAL_USB_IDLE;
     }
     return DUAL_RECLAIMING;
+}
+
+// After 0x11 / give-up: keep we_paused_after_giveup until USB wants the sink
+// again — USB PCM streaming 0→1 (host Play after HID Pause) or speaker alt
+// 0→1. A still-open idle alt-set does not clear (librepods#724 auto-resume).
+static inline bool dual_connect_should_clear_anti_ping_pong(
+        bool we_paused_after_giveup,
+        bool usb_streaming_rising,
+        bool usb_spk_open_rising) {
+    if (!we_paused_after_giveup) return false;
+    return usb_streaming_rising || usb_spk_open_rising;
 }
 
 #endif // USBPODS_DUAL_CONNECT_POLICY_H
