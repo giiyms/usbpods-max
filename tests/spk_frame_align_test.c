@@ -58,6 +58,7 @@ int main(void) {
     EQ(s.rem_len, 1, "1-byte remainder");
     EQ(s.rem[0], 0xAB, "stashed leftover");
     EQ(s.misalign, 1, "misalign++");
+    EQ(s.half, 0, "leftover 1 is not half-frame");
 
     // Next 3 bytes complete that leftover into one frame, then 4 more = 2 frames.
     uint8_t chunk[3 + 4] = { 0x01, 0x02, 0x03, 0x11, 0x11, 0x22, 0x22 };
@@ -81,6 +82,7 @@ int main(void) {
     unsigned got_n = 0;
     spk_frame_align_reset(&s);
     s.misalign = 0;
+    s.half = 0;
 
     int16_t got_discard[TOTAL * 2];
     unsigned disc_n = 0;
@@ -134,6 +136,7 @@ int main(void) {
     // Reset remainder + counter on stream restart.
     uint32_t before = s.misalign;
     if (before == 0) FAIL("expected misalign from 194-byte packets");
+    if (s.half == 0) FAIL("expected half-frame (rem_len=2) counts from 194-byte packets");
     spk_frame_align_reset(&s);
     EQ(s.rem_len, 0, "reset leftover");
     // misalign is a CDC lifetime counter — firmware keeps it; test reset
@@ -141,7 +144,7 @@ int main(void) {
     (void)before;
 
     printf("spk_frame_align_test: PASS (%u sticky frames match source, "
-           "discard path diverges after mid-frame packet, misalign events=%u)\n",
-           got_n, (unsigned)before);
+           "discard path diverges after mid-frame packet, misalign events=%u half=%u)\n",
+           got_n, (unsigned)before, (unsigned)s.half);
     return 0;
 }
