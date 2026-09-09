@@ -861,7 +861,7 @@ static void aacp_handle_control(const uint8_t *pkt, uint16_t size) {
 
     if (opcode == 0x000D || opcode == 0x000E || opcode == 0x0010 || opcode == 0x0011) {
         // Audio source / smart routing RX. TX hijack is LibrePods AACPManager
-        // builders on reclaim (aacp_reassert_ownership). Parse 0x0E only here.
+        // builders on reclaim (aacp_reassert_ownership). Parse 0x0E / 0x11 here.
         if (opcode == 0x000E) {
             dual_audio_source_t src;
             if (dual_connect_parse_0e(pkt, size, &src)) {
@@ -871,6 +871,42 @@ static void aacp_handle_control(const uint8_t *pkt, uint16_t size) {
                        (unsigned) src.type);
                 /* Give-up uses owns=00 / reclaim stop; need local MAC to
                  * compare before acting on 0x0E (no invented hijack). */
+            }
+        }
+        if (opcode == 0x0011) {
+            // LibrePods AACPManager SMART_ROUTING_RESP: SetOwnershipToFalse
+            // → pause, OWNS=00, they-own. Do not immediately reclaim / 0x10.
+            dual_connect_0x11_decision_t d = dual_connect_decide_0x11(
+                    pkt, size,
+                    avdtp_usb_speaker_is_open(),
+                    avdtp_usb_is_streaming());
+            if (d.recognized) {
+                uint8_t sender[6];
+                if (dual_connect_parse_0x11_sender(pkt, size, sender)) {
+                    printf("[AACP] 0x11 SetOwnershipToFalse from "
+                           "%02X:%02X:%02X:%02X:%02X:%02X reverse=%u "
+                           "pause=%u (THEY_OWN, no hijack)\n",
+                           sender[0], sender[1], sender[2],
+                           sender[3], sender[4], sender[5],
+                           (unsigned) d.reverse_banner,
+                           (unsigned) d.pause_media);
+                } else {
+                    printf("[AACP] 0x11 SetOwnershipToFalse reverse=%u "
+                           "pause=%u (THEY_OWN, no hijack)\n",
+                           (unsigned) d.reverse_banner,
+                           (unsigned) d.pause_media);
+                }
+                if (d.send_owns_giveup) {
+                    uint8_t giveup[DUAL_CTRL_FRAME_LEN];
+                    dual_connect_build_owns_giveup(giveup);
+                    aacp_tx_enqueue(giveup, DUAL_CTRL_FRAME_LEN);
+                    aacp_owns = DUAL_OWNS_GIVEUP_VAL;
+                }
+                if (d.pause_media) {
+                    hid_consumer_pause();
+                    printf("[AACP] 0x11 → HID Pause (they own, anti-ping-pong)\n");
+                }
+                avdtp_dual_connect_note_they_own();
             }
         }
         aacp_dump_hex(opcode == 0x000D ? "0x000D audio-src-req" :

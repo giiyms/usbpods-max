@@ -38,6 +38,8 @@
 
 // Only send takeOver 0x10 hijack when USB wants the sink and anti-ping-pong
 // is not armed (LibrePods #724 / dual_connect_should_reclaim_on_steal).
+// 0x11 RX SetOwnershipToFalse is parsed in dual_connect_policy.h — never
+// answer it with an immediate 0x10 burst.
 static inline bool aacp_sr_should_send_hijack(bool usb_spk_open,
                                               bool is_usb_streaming,
                                               bool we_paused_after_giveup) {

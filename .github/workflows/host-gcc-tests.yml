@@ -1,0 +1,25 @@
+name: host-gcc-tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  host-gcc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run host gcc tests
+        run: |
+          set -e
+          gcc --version
+          gcc -I. -O2 -o /tmp/dual_connect_policy_test tests/dual_connect_policy_test.c
+          /tmp/dual_connect_policy_test
+          gcc -I. -O2 -o /tmp/aacp_smart_routing_test tests/aacp_smart_routing_test.c
+          /tmp/aacp_smart_routing_test
+          gcc -I. -O2 -o /tmp/aacp_ear_test tests/aacp_ear_test.c
+          /tmp/aacp_ear_test
+          gcc -I. -O2 -o /tmp/avdtp_reclaim_test tests/avdtp_reclaim_test.c
+          /tmp/avdtp_reclaim_test
+          gcc -I. -O2 -o /tmp/spk_frame_align_test tests/spk_frame_align_test.c
+          /tmp/spk_frame_align_test
