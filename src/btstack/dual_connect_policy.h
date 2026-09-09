@@ -224,6 +224,7 @@ static inline bool dual_connect_anti_ping_pong_blocks_reclaim(bool we_paused_aft
 
 // Post-reclaim: allow Play / AVDTP START only if we paused for the steal
 // (otherwise stay paused — do not yank media from a quiet Mac).
+// Timing/retries live in host_session_wake.h (HID Play after STREAM start).
 static inline bool dual_connect_allow_play_after_reclaim(bool we_paused_for_steal) {
     return we_paused_for_steal;
 }

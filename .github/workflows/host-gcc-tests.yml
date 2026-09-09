@@ -27,3 +27,5 @@ jobs:
           /tmp/avdtp_reclaim_test
           gcc -I. -O2 -o /tmp/spk_frame_align_test tests/spk_frame_align_test.c
           /tmp/spk_frame_align_test
+          gcc -I. -O2 -o /tmp/host_session_wake_test tests/host_session_wake_test.c
+          /tmp/host_session_wake_test
