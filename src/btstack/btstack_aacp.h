@@ -71,8 +71,10 @@ const char *aacp_get_dev_model(void);
 const char *aacp_get_dev_serial(void);
 const char *aacp_get_dev_fw(void);
 
-// Re-send LibrePods 0x06 owns + 0x20 auto-conn. Call after dual-connect steal
-// while AACP is still up. Does not invent hijack/0x0E blobs.
+// Re-send LibrePods 0x06 owns + 0x20 auto-conn, then (when USB wants sink)
+// LibrePods takeOver 0x10: media_info + showUI + hijack to 0x2E peers ≠ self.
+// Call after dual-connect steal while AACP is still up. Builders are verbatim
+// AACPManager.kt — may no-op without Apple DID acceptance.
 void aacp_reassert_ownership(void);
 
 // Send documented control commands (opcode 0x0009). Returns false if the

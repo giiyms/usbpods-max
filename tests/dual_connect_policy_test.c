@@ -115,11 +115,10 @@ int main(void) {
         EQS(ac, hdr, 6, "0x20 control hdr");
     }
 
-    // 10) 0x10 smart-routing hijack builders intentionally deferred
-    // (MAC-specific LibrePods blobs — no invented opcodes).
+    // 10) 0x10 smart-routing: see tests/aacp_smart_routing_test.c
 
     printf("dual_connect_policy_test: PASS "
            "(idle, steal→claim, status129, owns00, 0x0E, anti-ping-pong, "
-           "play-gate, 0x2E, OWNS+0x20; 0x10 deferred)\n");
+           "play-gate, 0x2E, OWNS+0x20; 0x10 in aacp_smart_routing_test)\n");
     return 0;
 }

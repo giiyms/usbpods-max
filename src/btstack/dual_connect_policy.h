@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //
 // Dual-connect A2DP ownership policy (host-side, pure helpers).
-// LibrePods cites only: 0x06 OWNS, 0x20 autocon, 0x0E audio source,
-// 0x2E connected devices. Anti-ping-pong: librepods-org#724
-// (i_paused_the_media — auto-resume after give-up must not reclaim).
-// No invented AACP opcodes / 0x10 hijack blobs.
+// LibrePods: 0x06 OWNS, 0x20 autocon, 0x0E audio source, 0x2E connected
+// devices. Anti-ping-pong: librepods-org#724 (i_paused_the_media — auto-resume
+// after give-up must not reclaim). 0x10 smart-routing builders live in
+// aacp_smart_routing.h (verbatim LibrePods AACPManager.kt).
 
 #ifndef USBPODS_DUAL_CONNECT_POLICY_H
 #define USBPODS_DUAL_CONNECT_POLICY_H

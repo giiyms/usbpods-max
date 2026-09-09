@@ -46,9 +46,9 @@ Handshake replay runs after handshake + `0x004D` + `0x000F` on **every new AACP 
 | Stem / crown / button events | `0x0019` | parsed + HID | Android `parseStemPressResponse`: size 8, type `pkt[6]`, bud `pkt[7]`. Types: single `0x05`, double `0x06`, triple `0x07`, long `0x08`. Bud L=`0x01` R=`0x02`. Map: single→Play/Pause, double→Next, triple→Prev, long→headset noise cycle via `0x16` (do not double-send `0x0D` when hold=noise). Unknown payloads dumped hex. **Crown rotation volume is AVRCP Absolute Volume**, not a `0x0019` type — applied to UAC speaker + HID Vol Up/Down. |
 | CA speaking | `0x004B` | parsed | `04 00 04 00 4B 00 02 00 01 [level]`. `01/02` duck USB speaker a lot (~15%); `03` restore; `08/09` normal; 4–7 interpolate. **Mic path untouched.** Config remains `0x28`. |
 | Device info | `0x001D` | parsed | Unsolicited host-only; do not request. Null-terminated strings: name, model, manufacturer, serial, fw. |
-| Audio source req/resp | `0x000D` / `0x000E` | dumped | Android parses `0x0E` MAC+type. Hijack is `OWNS=1` + `sendMediaInformation` + `sendHijackRequest` (MAC-specific blobs). **No reply invented.** USB speaker alt≠0 still `control_request_reconnect()` for A2DP. |
-| Connected devices | `0x002D` / `0x002E` | dumped | LibrePods list of connected devices. Live dual-connect steal shows the iPhone MAC in `0x2E`. **No reply invented.** |
-| Smart routing | `0x0010` / `0x0011` | dumped | Same: no invented reply. |
+| Audio source req/resp | `0x000D` / `0x000E` | dumped + parsed | Android parses `0x0E` MAC+type. Hijack TX is separate `0x10` (below). USB speaker alt≠0 still `control_request_reconnect()` for A2DP. |
+| Connected devices | `0x002D` / `0x002E` | parsed + TX | LibrePods list of connected devices. New peer ≠ self → `createMediaInformationNewDevicePacket` + `createAddTiPiDevicePacket` (verbatim). |
+| Smart routing | `0x0010` / `0x0011` | implemented (TX) + dumped (RX) | Verbatim LibrePods `AACPManager.kt` builders (`aacp_smart_routing.h`). takeOver order after OWNS: media_info + showUI + hijack. **DID caveat:** may no-op without Apple Device ID acceptance (LibrePods vendor-id hook). btName=`Android`. |
 | Rename | opcode **`0x001A`** | implemented | Docs `opcodes.md` lists `0x001E` but that id is AutoAnswer. LibrePods send path: `04 00 04 00 1A 00 01 [size] 00 [name]`. CDC `rename <str>` + WebHID cmd `0x0F`. |
 | Hearing aid `0x2C/0x33/0x3D` | — | skipped | user: not Max 2 scope |
 | HRM `0x30` | — | skipped | |
@@ -61,16 +61,18 @@ Handshake replay runs after handshake + `0x004D` + `0x000F` on **every new AACP 
 
 ## Dual-connect hunch (protocol side)
 
-iPhone can keep the AACP/HFP session so crown volume hits the phone. Firmware always claims **`0x06` own** and LibrePods **`0x20=0x01`** on every AACP session, and **re-sends `0x06`/`0x20` (LibrePods takeOver)** when A2DP is stolen. Dual-connect may still need the user to set iPhone “Connect only When Last Connected”. Hijack `0x0E` / `0x10` blobs are not invented.
+iPhone can keep the AACP/HFP session so crown volume hits the phone. Firmware always claims **`0x06` own** and LibrePods **`0x20=0x01`** on every AACP session, and **re-sends `0x06`/`0x20` plus LibrePods `0x10` takeOver** (media_info + showUI + hijack) when A2DP is stolen **and USB speaker is open**. Dual-connect may still need the user to set iPhone “Connect only When Last Connected”.
 
-Host-side policy (`src/btstack/dual_connect_policy.h`, tests in `tests/dual_connect_policy_test.c`):
+**DID caveat:** LibrePods notes smart-routing / hijack often requires Apple Device Identification Profile vendor ID acceptance. Without it, `0x10` may no-op even though packets are sent.
+
+Host-side policy (`src/btstack/dual_connect_policy.h`, `src/btstack/aacp_smart_routing.h`; tests in `tests/dual_connect_policy_test.c`, `tests/aacp_smart_routing_test.c`):
 
 - States: USB_IDLE / WE_OWN_STREAMING / THEY_OWN / RECLAIMING / GIVE_UP.
 - Reclaim on unexpected pause / START reject only when USB wants the sink.
 - OWNS claim/give-up exact frames; parse `0x0E` (MAC reversed + type) and `0x2E` (count + 8-byte records) per LibrePods `AACPManager`.
 - Anti-ping-pong ([librepods#724](https://github.com/librepods-org/librepods/pull/724)): after give-up (`owns=00` / peer playing), auto-resume must not reclaim until explicit USB speaker open.
 - Post-reclaim Play gated on `we_paused_for_steal`. Stop reclaim if OWNS stays `00`.
-- **Deferred:** `0x10` smart-routing hijack builders (MAC-specific LibrePods blobs only).
+- **`0x10` smart-routing hijack implemented** (verbatim LibrePods Android builders; USB_IDLE → no send; reclaim path after OWNS).
 
 ## HID
 
