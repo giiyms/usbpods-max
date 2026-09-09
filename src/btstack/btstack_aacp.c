@@ -26,6 +26,7 @@
 #include "btstack_aacp.h"
 #include "dual_connect_policy.h"
 #include "aacp_smart_routing.h"
+#include "aacp_cdc_dump.h"
 #include "btstack_avdtp_source.h"
 #include "aacp_ear.h"
 #include "aacp_mic_dec.h"
@@ -147,6 +148,14 @@ static uint8_t aacp_last19_type = 0;
 static uint8_t aacp_last19_bud  = 0;
 static uint32_t aacp_imu_last_log_ms = 0;
 
+/* Last 0x0E audio-src (display-order MAC). Mirrors existing parse; @STATUS only. */
+static uint8_t aacp_src_mac[6];
+static uint8_t aacp_src_type;
+static bool    aacp_src_known;
+
+/* CDC `aacpdump on` — full hex for non-dual packets. Dual-connect is always full. */
+static bool aacp_dump_full = false;
+
 /* 0x2E connected-devices cache (LibrePods connectedDevices / oldConnectedDevices). */
 static dual_connected_device_t aacp_conn_devs[DUAL_CONN_DEV_MAX];
 static int aacp_conn_dev_count = 0;
@@ -188,6 +197,9 @@ static void aacp_status_reset(void) {
     aacp_dev_name[0] = aacp_dev_model[0] = aacp_dev_serial[0] = aacp_dev_fw[0] = 0;
     aacp_conn_dev_count = 0;
     aacp_conn_dev_count_old = 0;
+    aacp_src_known = false;
+    aacp_src_type = 0;
+    memset(aacp_src_mac, 0, sizeof(aacp_src_mac));
     btstack_run_loop_remove_timer(&aacp_ear_timer);
 }
 
@@ -278,6 +290,7 @@ void aacp_connect(bd_addr_t addr) {
 }
 
 static void aacp_mic_teardown(void);   // fwd
+static void aacp_dump_hex(const char *tag, const uint8_t *p, uint16_t n);
 
 void aacp_disconnect(void) {
     btstack_run_loop_remove_timer(&aacp_connect_timer);
@@ -313,6 +326,9 @@ static bool aacp_tx_enqueue(const uint8_t *data, uint16_t len) {
     aacp_tx_queue[slot].len  = len;
     aacp_tx_count++;
     if (aacp_cid != 0) l2cap_request_can_send_now_event(aacp_cid);
+    /* Dual-connect TX (0x0E/0x10/0x11/0x2E / OWNS / 0x20) — full frames, rare. */
+    if (aacp_cdc_dump_should_full(data, len, false))
+        aacp_dump_hex("tx", data, len);
     return true;
 }
 
@@ -513,16 +529,27 @@ static void aacp_handle_audio_sdu(const uint8_t *sdu, uint16_t size) {
 // Logging only on *change* for noisy reports — these handlers share A2DP.
 
 static void aacp_dump_hex(const char *tag, const uint8_t *p, uint16_t n) {
-    char line[120];
-    uint16_t cap = n > 24 ? 24 : n;
-    int o = snprintf(line, sizeof(line), "[AACP] %s n=%u:", tag, (unsigned) n);
-    for (uint16_t i = 0; i < cap && o < (int) sizeof(line) - 4; i++) {
-        o += snprintf(line + o, sizeof(line) - (size_t) o, " %02X", p[i]);
+    /* Dual-connect opcodes always print complete frames (line-oriented).
+     * Other packets stay at a 24-byte preview unless `aacpdump on`. */
+    bool full = aacp_cdc_dump_should_full(p, n, aacp_dump_full);
+    uint16_t cap = (full || n <= AACP_CDC_DUMP_PREVIEW) ? n : (uint16_t) AACP_CDC_DUMP_PREVIEW;
+    printf("[AACP] %s n=%u:", tag, (unsigned) n);
+    for (uint16_t i = 0; i < cap; i++)
+        printf(" %02X", p[i]);
+    if (n > cap) printf(" …");
+    printf("\n");
+}
+
+void aacp_set_dump_full(bool on) { aacp_dump_full = on; }
+bool aacp_get_dump_full(void) { return aacp_dump_full; }
+
+void aacp_get_audio_src(uint8_t mac[6], uint8_t *type, bool *known) {
+    if (known) *known = aacp_src_known;
+    if (type) *type = aacp_src_type;
+    if (mac) {
+        if (aacp_src_known) memcpy(mac, aacp_src_mac, 6);
+        else memset(mac, 0, 6);
     }
-    if (n > cap && o < (int) sizeof(line) - 4) {
-        snprintf(line + o, sizeof(line) - (size_t) o, " …");
-    }
-    printf("%s\n", line);
 }
 
 static uint8_t aacp_ca_duck_from_level(uint8_t level) {
@@ -865,6 +892,9 @@ static void aacp_handle_control(const uint8_t *pkt, uint16_t size) {
         if (opcode == 0x000E) {
             dual_audio_source_t src;
             if (dual_connect_parse_0e(pkt, size, &src)) {
+                memcpy(aacp_src_mac, src.mac, 6);
+                aacp_src_type = src.type;
+                aacp_src_known = true;
                 printf("[AACP] 0x0E audio-src MAC %02X:%02X:%02X:%02X:%02X:%02X type=%u\n",
                        src.mac[0], src.mac[1], src.mac[2],
                        src.mac[3], src.mac[4], src.mac[5],

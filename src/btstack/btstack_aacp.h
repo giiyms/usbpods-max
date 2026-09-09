@@ -71,6 +71,14 @@ const char *aacp_get_dev_model(void);
 const char *aacp_get_dev_serial(void);
 const char *aacp_get_dev_fw(void);
 
+// Last 0x0E audio-src (display-order MAC). known=false until the first parse.
+void aacp_get_audio_src(uint8_t mac[6], uint8_t *type, bool *known);
+
+// CDC `aacpdump on|off`: full hex for non-dual packets. Dual-connect
+// opcodes (0x0E/0x10/0x11/0x2E) always dump complete frames.
+void aacp_set_dump_full(bool on);
+bool aacp_get_dump_full(void);
+
 // Re-send LibrePods 0x06 owns + 0x20 auto-conn, then (when USB wants sink)
 // LibrePods takeOver 0x10: media_info + showUI + hijack to 0x2E peers ≠ self.
 // Call after dual-connect steal while AACP is still up. Builders are verbatim

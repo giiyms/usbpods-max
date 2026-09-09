@@ -64,10 +64,14 @@ void control_fill_status(uint8_t *buf, uint16_t len) {
     if (aacp_mic_active())         flags |= 0x04;
 
     uint8_t flags2 = 0;
-    if (aacp_get_owns() == 1)        flags2 |= 0x01;
-    if (aacp_get_ca_duck_q8() < 200) flags2 |= 0x02;
-    if (aacp_get_auto_conn() == 1)   flags2 |= 0x04;
-    if (aacp_get_ear_en() == 1)      flags2 |= 0x08;
+    if (aacp_get_owns() == 1)           flags2 |= 0x01;
+    if (aacp_get_ca_duck_q8() < 200)    flags2 |= 0x02;
+    if (aacp_get_auto_conn() == 1)      flags2 |= 0x04;
+    if (aacp_get_ear_en() == 1)         flags2 |= 0x08;
+    if (avdtp_reclaim_steal_active())    flags2 |= 0x10;
+    if (avdtp_we_paused_after_giveup()) flags2 |= 0x20;
+    if (avdtp_usb_speaker_is_open())     flags2 |= 0x40;
+    if (avdtp_usb_is_streaming())       flags2 |= 0x80;
 
     buf[0]  = CTRL_RSP_STATUS;
     buf[1]  = flags;
@@ -137,10 +141,24 @@ void control_print_status_human(void) {
            aacp_get_dev_serial(), aacp_get_dev_fw());
     printf("  last 0x0019 %s\n", aacp_get_last19_hex()[0] ? aacp_get_last19_hex() : "(none)");
 
+    char peer[20] = "-";
+    {
+        uint8_t pmac[6];
+        uint8_t ptype = 0;
+        bool pknown = false;
+        aacp_get_audio_src(pmac, &ptype, &pknown);
+        if (pknown) {
+            snprintf(peer, sizeof(peer), "%02x:%02x:%02x:%02x:%02x:%02x",
+                     pmac[0], pmac[1], pmac[2], pmac[3], pmac[4], pmac[5]);
+        }
+        (void) ptype;
+    }
+
     printf("@STATUS a2dp=%u aacp=%u mic=%u gain=%u slot=%u mute=%u "
            "bat_l=%u bat_r=%u bat_c=%u bat_h=%u noise=%u ear_l=%u ear_r=%u ca=%u "
            "owns=%u duck=%u autocon=%u allowauto=%u earen=%u gestures=%u hold=%u "
            "crown=%u autoans=%u chime=%u adaptvol=%u sleep=%u listen=%u "
+           "reclaim=%u paused=%u spk=%u stream=%u peer=%s "
            "last19=%s vol=%u name=%s model=%s serial=%s fw=%s findmy=unsupported "
            "spk_misalign=%lu "
            "addr=%02x:%02x:%02x:%02x:%02x:%02x\n",
@@ -155,6 +173,11 @@ void control_print_status_human(void) {
            aacp_get_ear_en(), aacp_get_gestures(), aacp_get_click_hold(),
            aacp_get_crown_dir(), aacp_get_auto_ans(), aacp_get_chime(),
            aacp_get_adapt_vol(), aacp_get_sleep_det(), aacp_get_listen_mask(),
+           avdtp_reclaim_steal_active() ? 1 : 0,
+           avdtp_we_paused_after_giveup() ? 1 : 0,
+           avdtp_usb_speaker_is_open() ? 1 : 0,
+           avdtp_usb_is_streaming() ? 1 : 0,
+           peer,
            aacp_get_last19_hex()[0] ? aacp_get_last19_hex() : "-",
            (unsigned) get_bt_volume(),
            aacp_get_dev_name()[0] ? aacp_get_dev_name() : "-",
@@ -187,6 +210,7 @@ static void print_help(void) {
     printf("  gestures <mask>       Raw Gestures 0x39\n");
     printf("  hold noise|siri       ClickHoldMode 0x16\n");
     printf("  autocon on|off        Connect Automatically 0x20\n");
+    printf("  aacpdump on|off       full CDC hex for non-dual AACP (0x0E/0x10/0x11/0x2E always full)\n");
     printf("Host Bluetooth must NOT own the headset or A2DP goes silent.\n");
 }
 
@@ -387,6 +411,22 @@ void control_process_line(char *line) {
         int v = parse_onoff(arg);
         if (!v) printf("autocon: on | off  (LibrePods 0x20; 0x36 is not sent)\n");
         else req_autoconn = (uint8_t) v;
+        return;
+    }
+    if (!icmp(line, "aacpdump")) {
+        if (!*arg) {
+            printf("aacpdump %s (dual-connect 0x0E/0x10/0x11/0x2E always full)\n",
+                   aacp_get_dump_full() ? "on" : "off");
+            return;
+        }
+        int v = parse_onoff(arg);
+        if (!v) {
+            printf("aacpdump: on | off\n");
+            return;
+        }
+        aacp_set_dump_full(v == 1);
+        printf("aacpdump %s (dual-connect opcodes always full-frame)\n",
+               aacp_get_dump_full() ? "on" : "off");
         return;
     }
     printf("unknown command. h for help.\n");
