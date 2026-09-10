@@ -24,6 +24,7 @@ static bool prefs_dirty;
 static uint32_t last_kick_ms;
 static bool last_kick_valid;
 static bool kick_won;
+static bool logged_no_acl_hold; /* one-shot per HOLD: no Pico ACL / fight armed */
 static btstack_timer_source_t sx_timer;
 
 static struct {
@@ -119,6 +120,7 @@ static void sx_step_now(uint32_t now_ms) {
     dual_softexcl_step(&sx, wants, now_ms);
     if (sx.phase != DUAL_SX_HOLD) {
         kick_won = false;
+        logged_no_acl_hold = false;
     }
 }
 
@@ -153,13 +155,21 @@ static void kick(uint32_t now_ms) {
         kick_won = true;
         printf("[SX] kick won (%d extra ACL) — fight suppressed while HOLD\n",
                dropped);
-    } else if (phone_known &&
-               !dual_softexcl_mac_is_protected(phone_mac, self, maxa) &&
-               !acl_has_mac(phone_mac)) {
-        sx_log_mac("no Pico ACL to phone", phone_mac);
-        printf("[SX] Max-side dual-connect — fight path stays armed (reclaim/0x10)\n");
-    } else if (dropped == 0) {
-        printf("[SX] HOLD, no extra Pico ACL — fight path stays armed\n");
+        logged_no_acl_hold = false;
+    } else if (!logged_no_acl_hold) {
+        /* HOLD polls ~50 ms; without this, "no Pico ACL" / fight-armed spam
+         * floods Quiet (~hundreds of lines / few minutes on Max-only). */
+        logged_no_acl_hold = true;
+        if (phone_known &&
+            !dual_softexcl_mac_is_protected(phone_mac, self, maxa) &&
+            !acl_has_mac(phone_mac)) {
+            sx_log_mac("no Pico ACL to phone", phone_mac);
+            printf("[SX] Max-side dual-connect — fight path stays armed "
+                   "(reclaim/0x10; log once per HOLD)\n");
+        } else if (dropped == 0) {
+            printf("[SX] HOLD, no extra Pico ACL — fight path stays armed "
+                   "(log once per HOLD)\n");
+        }
     }
 }
 
@@ -171,6 +181,7 @@ void softexcl_init(void) {
     prefs_dirty = false;
     last_kick_valid = false;
     kick_won = false;
+    logged_no_acl_hold = false;
     memset(acls, 0, sizeof(acls));
     src_known = false;
     devs_n = 0;

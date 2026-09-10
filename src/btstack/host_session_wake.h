@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Host USB session wake after dual-connect steal reclaim.
+// Host USB session wake after dual-connect steal reclaim, and when USB
+// speaker ISO OUT drops (1→0) while A2DP + OWNS stay up and the speaker
+// alt-set is still open (Windows TinyUSB silent — live Quiet 2026-09-10).
 //
 // Windows can keep TinyUSB as the default device with the speaker alt-set
 // still “open” while WASAPI has stopped ISO OUT (HID Pause / session desync).
 // Switching the default device away and back recreates the pin. Firmware
-// cannot SET_INTERFACE (host-owned). After A2DP START we:
+// cannot SET_INTERFACE (host-owned). After A2DP START (reclaim) or on USB
+// stream drop we:
 //   1) HID Play (discrete 0xB0) if we paused for the steal — delayed so it
 //      is not lost during AVDTP setup; one retry if PCM never returns
 //   2) Clear UAC speaker Feature Unit mute and interrupt (in-tree
@@ -61,13 +64,19 @@ static inline bool host_wake_should_arm(bool we_paused_for_steal,
     return we_paused_for_steal && a2dp_streaming;
 }
 
-static inline uint8_t host_wake_arm(host_wake_t *w, uint32_t now_ms,
-                                     bool we_paused_for_steal,
-                                     bool a2dp_streaming) {
-    if (!w) return HOST_WAKE_ACT_NONE;
-    if (!host_wake_should_arm(we_paused_for_steal, a2dp_streaming)) {
-        return HOST_WAKE_ACT_NONE;
-    }
+// USB ISO OUT went silent while A2DP still runs, we own the connection,
+// and the speaker alt is still open — same #17 wake as post-reclaim.
+// Does not require we_paused_for_steal (Windows session desync, not steal).
+static inline bool host_wake_should_arm_on_usb_drop(bool usb_streaming_falling,
+                                                    bool a2dp_streaming,
+                                                    bool we_own,
+                                                    bool usb_spk_open) {
+    return usb_streaming_falling && a2dp_streaming && we_own && usb_spk_open;
+}
+
+static inline uint8_t host_wake_arm_if(host_wake_t *w, uint32_t now_ms,
+                                       bool should) {
+    if (!w || !should) return HOST_WAKE_ACT_NONE;
     if (w->phase != HOST_WAKE_IDLE) {
         return HOST_WAKE_ACT_NONE;
     }
@@ -75,6 +84,25 @@ static inline uint8_t host_wake_arm(host_wake_t *w, uint32_t now_ms,
     w->plays_sent = 0;
     w->due_ms = now_ms + (uint32_t) HOST_WAKE_PLAY_DELAY_MS;
     return HOST_WAKE_ACT_UNMUTE;
+}
+
+static inline uint8_t host_wake_arm(host_wake_t *w, uint32_t now_ms,
+                                     bool we_paused_for_steal,
+                                     bool a2dp_streaming) {
+    return host_wake_arm_if(w, now_ms,
+                            host_wake_should_arm(we_paused_for_steal,
+                                                 a2dp_streaming));
+}
+
+static inline uint8_t host_wake_arm_usb_drop(host_wake_t *w, uint32_t now_ms,
+                                             bool usb_streaming_falling,
+                                             bool a2dp_streaming,
+                                             bool we_own,
+                                             bool usb_spk_open) {
+    return host_wake_arm_if(
+        w, now_ms,
+        host_wake_should_arm_on_usb_drop(usb_streaming_falling, a2dp_streaming,
+                                         we_own, usb_spk_open));
 }
 
 static inline bool host_wake_due(uint32_t now_ms, uint32_t due_ms) {
