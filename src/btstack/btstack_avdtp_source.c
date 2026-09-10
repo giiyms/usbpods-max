@@ -544,6 +544,20 @@ static void host_wake_begin_after_stream(void) {
     host_wake_timer_rearm();
 }
 
+/* USB ISO OUT 1→0 while A2DP + owns still up and speaker alt open — reuse #17. */
+static void host_wake_begin_on_usb_drop(void) {
+    uint32_t now = btstack_run_loop_get_time_ms();
+    bool we_own = (aacp_get_owns() == DUAL_OWNS_CLAIM_VAL);
+    uint8_t acts = host_wake_arm_usb_drop(&host_wake, now, true, is_streaming,
+                                          we_own, usb_spk_open);
+    if (acts == HOST_WAKE_ACT_NONE && host_wake.phase == HOST_WAKE_IDLE) return;
+    printf("[A2DP] USB stream drop while A2DP/owns → host session wake "
+           "(Play in %u ms)\n",
+           (unsigned) HOST_WAKE_PLAY_DELAY_MS);
+    host_wake_apply_acts(acts);
+    host_wake_timer_rearm();
+}
+
 void avdtp_set_usb_speaker_open(bool open) {
     /* Explicit USB speaker alt!=0 clears give-up hold so a real user sink
      * request can reclaim again (not an auto-resume ping-pong). */
@@ -984,6 +998,7 @@ bool check_is_streaming(){
 }
 
 void set_usb_streaming(bool flag){
+    bool falling = is_usb_streaming && !flag;
     /* 0x11 / give-up: HID Pause drops USB PCM; user Play raises it again. */
     if (dual_connect_should_clear_anti_ping_pong(we_paused_after_giveup,
                                                 flag && !is_usb_streaming,
@@ -992,6 +1007,14 @@ void set_usb_streaming(bool flag){
         printf("[A2DP] anti-ping-pong clear (USB streaming again after give-up)\n");
     }
     is_usb_streaming = flag;
+    /* Live Quiet: usbstream 1→0 while a2dp/owns stayed up and TinyUSB silent.
+     * Reuse #17 host wake (UAC unmute + HID Play + retry), not only on reclaim. */
+    if (falling &&
+        host_wake_should_arm_on_usb_drop(true, is_streaming,
+                                         aacp_get_owns() == DUAL_OWNS_CLAIM_VAL,
+                                         usb_spk_open)) {
+        host_wake_begin_on_usb_drop();
+    }
 }
 
 bool get_allow_switch_slot(){

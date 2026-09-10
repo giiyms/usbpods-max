@@ -28,6 +28,18 @@ int main(void) {
     EQ(host_wake_should_arm(true, true), 1, "arm after reclaim STREAM");
     EQ(dual_connect_allow_play_after_reclaim(true), 1, "Play gate still steal-only");
 
+    // USB stream drop while A2DP + owns + speaker alt open (live Quiet case).
+    EQ(host_wake_should_arm_on_usb_drop(false, true, true, true), 0,
+       "no arm without falling edge");
+    EQ(host_wake_should_arm_on_usb_drop(true, false, true, true), 0,
+       "no arm without A2DP streaming");
+    EQ(host_wake_should_arm_on_usb_drop(true, true, false, true), 0,
+       "no arm without owns");
+    EQ(host_wake_should_arm_on_usb_drop(true, true, true, false), 0,
+       "no arm when speaker alt closed");
+    EQ(host_wake_should_arm_on_usb_drop(true, true, true, true), 1,
+       "arm on USB drop while A2DP/owns/spk open");
+
     host_wake_t w;
     host_wake_reset(&w);
 
@@ -85,8 +97,31 @@ int main(void) {
     EQ(host_wake_next_delay_ms(&w, 200), HOST_WAKE_PLAY_DELAY_MS, "delay to Play");
     EQ(host_wake_next_delay_ms(&w, 200 + HOST_WAKE_PLAY_DELAY_MS), 1, "overdue → 1");
 
+    // USB-drop arm reuses the same unmute → delayed Play → retry path.
+    host_wake_reset(&w);
+    acts = host_wake_arm_usb_drop(&w, 5000, true, true, true, true);
+    EQ(acts, HOST_WAKE_ACT_UNMUTE, "usb-drop unmute on arm");
+    EQ(w.phase, HOST_WAKE_WAIT_PLAY, "usb-drop wait Play");
+    EQ(host_wake_arm_usb_drop(&w, 5001, true, true, true, true),
+       HOST_WAKE_ACT_NONE, "usb-drop no double-arm");
+    EQ(host_wake_arm(&w, 5001, true, true), HOST_WAKE_ACT_NONE,
+       "reclaim arm blocked while usb-drop wake active");
+    acts = host_wake_poll(&w, 5000 + HOST_WAKE_PLAY_DELAY_MS, true, false);
+    EQ(acts, HOST_WAKE_ACT_PLAY, "usb-drop first Play");
+    acts = host_wake_poll(&w, w.due_ms, true, false);
+    EQ(acts & HOST_WAKE_ACT_PLAY, HOST_WAKE_ACT_PLAY, "usb-drop retry Play");
+    EQ(acts & HOST_WAKE_ACT_ISO_NUDGE, HOST_WAKE_ACT_ISO_NUDGE,
+       "usb-drop iso nudge when alt open and no PCM");
+
+    // Negative: falling but no owns / no A2DP / alt closed → no arm.
+    host_wake_reset(&w);
+    EQ(host_wake_arm_usb_drop(&w, 0, true, true, false, true),
+       HOST_WAKE_ACT_NONE, "usb-drop no arm without owns");
+    EQ(w.phase, HOST_WAKE_IDLE, "still idle without owns");
+
     printf("host_session_wake_test: PASS "
-           "(gate, unmute, Play +%u ms, one retry + iso nudge, no spray)\n",
+           "(reclaim + usb-drop gates, unmute, Play +%u ms, "
+           "one retry + iso nudge, no spray)\n",
            (unsigned) HOST_WAKE_PLAY_DELAY_MS);
     return 0;
 }
