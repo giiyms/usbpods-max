@@ -55,6 +55,7 @@
 #include "avdtp_reclaim.h"
 #include "dual_connect_policy.h"
 #include "host_session_wake.h"
+#include "softexcl.h"
 #include "classic/device_id_server.h"
 
 #include "../pico_w_led.h"
@@ -723,6 +724,15 @@ static void reclaim_arm_after_release(void) {
 static void avdtp_reclaim_after_steal(void) {
     if (reclaim_hold) return;
     if (reclaim_drop_issued) return;
+    softexcl_kick_now();
+    if (softexcl_kick_suppresses_fight()) {
+        printf("[A2DP] steal reclaim skipped (softexcl dropped Pico phone ACL)\n");
+        aacp_reassert_ownership();
+        return;
+    }
+    if (softexcl_phase() == DUAL_SX_HOLD) {
+        printf("[A2DP] softexcl HOLD, no Pico phone ACL — fight reclaim/0x10\n");
+    }
     if (we_paused_after_giveup) {
         printf("[A2DP] steal reclaim skipped (anti-ping-pong after give-up)\n");
         return;
@@ -3006,6 +3016,7 @@ int btstack_main(int argc, const char * argv[]){
 
     l2cap_init();
     aacp_init();
+    softexcl_init();
     bt_hci_init();
 
     // Initialize AVDTP Sink

@@ -363,6 +363,7 @@ bool write_slot2_mac(const uint8_t mac[MAC_LEN]) {
 #define SETTINGS_SLEEP_OFF        22
 #define SETTINGS_CROWN_OFF        23
 #define SETTINGS_LISTEN_OFF       24
+#define SETTINGS_SOFTEXCL_OFF     25
 
 uint8_t read_mic_gain_flash(void) {
     const uint8_t *flash_ptr = (const uint8_t *)(XIP_BASE + mac_page_base);
@@ -386,6 +387,7 @@ void read_host_prefs_flash(host_prefs_t *out) {
     out->sleep_det   = 1;
     out->crown_dir   = 2;
     out->listen_mask = 0x0F;
+    out->softexcl    = 1;   // soft exclusive default on
     const uint8_t *flash_ptr = (const uint8_t *)(XIP_BASE + mac_page_base);
     if (flash_ptr[SETTINGS_MAGIC_OFF] != SETTINGS_MAGIC) return;
     if (flash_ptr[SETTINGS_EXTRA_OFF] != SETTINGS_EXTRA_MAGIC) return;
@@ -395,12 +397,14 @@ void read_host_prefs_flash(host_prefs_t *out) {
     uint8_t s = flash_ptr[SETTINGS_SLEEP_OFF];
     uint8_t d = flash_ptr[SETTINGS_CROWN_OFF];
     uint8_t m = flash_ptr[SETTINGS_LISTEN_OFF];
+    uint8_t sx = flash_ptr[SETTINGS_SOFTEXCL_OFF];
     if (a == 1 || a == 2) out->auto_ans = a;
     if (c <= 100) out->chime = c;
     if (v == 1 || v == 2) out->adapt_vol = v;
     if (s == 1 || s == 2) out->sleep_det = s;
     if (d == 1 || d == 2) out->crown_dir = d;
     if (m != 0) out->listen_mask = m;
+    if (sx == 1 || sx == 2) out->softexcl = sx;
 }
 
 bool write_host_settings_flash(uint8_t gain_db, const host_prefs_t *prefs) {
@@ -415,5 +419,6 @@ bool write_host_settings_flash(uint8_t gain_db, const host_prefs_t *prefs) {
     mac_page_buf[SETTINGS_SLEEP_OFF]   = prefs->sleep_det;
     mac_page_buf[SETTINGS_CROWN_OFF]   = prefs->crown_dir;
     mac_page_buf[SETTINGS_LISTEN_OFF]  = prefs->listen_mask;
+    mac_page_buf[SETTINGS_SOFTEXCL_OFF] = (prefs->softexcl == 2) ? 2 : 1;
     return flash_safe_execute(mac_flash_cb, NULL, 100) == PICO_OK;
 }

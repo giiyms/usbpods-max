@@ -85,7 +85,7 @@ Speaker-path keys on `@STATUS` (USB ISO PCM **after** `spk_frame_align`, **befor
 | `spk_swap=` | `1` while `spk_rem=2` (live one-channel remainder). Coarse swap-suspect — **not** an AACP opcode. |
 | `spk_l=` `spk_r=` | Rolling RMS, integer dBFS. Serial-only; HID has no room. |
 
-Cross-correlation lag between L and R is **not** measured (deferred — too much CPU on the Pico). Dual-connect keys on `@STATUS` (same firmware state as flags2 / 0x0E parse — no invented opcodes): `reclaim=` steal-reclaim armed, `paused=` `we_paused_after_giveup`, `spk=` USB speaker open, `stream=` USB PCM streaming, `peer=` last `0x0E` audio-src MAC (`-` until the first parse). After iPhone steal/reclaim, CDC may log `[A2DP] steal → HID Pause`, `[A2DP] reclaim stream → host session wake`, `[A2DP] host session wake → HID Play`, `[USB] speaker FU unmute interrupt`, `[USB] speaker iso nudge` — Windows should resume TinyUSB PCM without switching the default device. If `spk=1 stream=0` persists, the old recovery is still: switch default audio device away from TinyUSB and back.
+Cross-correlation lag between L and R is **not** measured (deferred — too much CPU on the Pico). Dual-connect keys on `@STATUS` (same firmware state as flags2 / 0x0E parse — no invented opcodes): `reclaim=` steal-reclaim armed, `paused=` `we_paused_after_giveup`, `spk=` USB speaker open, `stream=` USB PCM streaming, `peer=` last `0x0E` audio-src MAC (`-` until the first parse), **`softexcl=`** `1` on / `0` off (default on), **`sxphase=`** `idle|hold|grace`, **`sxkick=`** `1` when HOLD kick dropped or refused a Pico phone ACL. Soft exclusive: while USB wants the sink (`spk` or `stream`), firmware tries HCI-disconnect of extra Pico ACLs that are not the Max / not self; iPhone stays **paired**. After USB idle (`spk=0` and `stream=0`) a 2 s GRACE, then the phone may reconnect. **Reclaim / `0x10` skip only when `sxkick=1`.** Max-only dual-connect (no Pico ACL to the iPhone) logs `no Pico ACL to phone` and **still fights** (AVDTP reclaim + `0x10` + host session wake). After iPhone steal/reclaim, CDC may log `[A2DP] softexcl HOLD, no Pico phone ACL — fight reclaim/0x10`, `[A2DP] steal → HID Pause`, `[A2DP] reclaim stream → host session wake`, `[A2DP] host session wake → HID Play`, `[USB] speaker FU unmute interrupt`, `[USB] speaker iso nudge` — Windows should resume TinyUSB PCM without switching the default device. If `spk=1 stream=0` persists, the old recovery is still: switch default audio device away from TinyUSB and back.
 
 ## Settings page diagnostics
 
@@ -97,7 +97,7 @@ GitHub Pages (`web/index.html`) can connect WebHID / Web Serial and:
 - **CDC console** (diagnostic log): attach **USBPods Max Console** beside WebHID, or as the Web Serial fallback. Every CDC text line is mirrored into the log (same `LOG_CAP` 800). Consecutive duplicate `@STATUS` lines from the status poll and the human `USBPods Max status` banner are collapsed so the cap is not burned. WebHID STATUS transitions still log when HID is up. Quiet writes CDC as `Uint8Array` (`TextEncoder`); a raw JS string throws `The provided value is not of type 'ArrayBuffer' or 'ArrayBufferView'`.
 - AACP hex / known opcodes are annotated from `AACP-FEATURES.md` (e.g. `0x0E` audio-src, `0x10` smart-routing, `0x11` SetOwnershipToFalse, `0x2E` connected devices, `0x06` OWNS, `0x20` autocon). Dual-connect lines (owns / they-own / reclaim / `0x11`) are highlighted.
 - **Export .aacp**: download a dump-replay fixture for `tests/aacp_dump_replay_test`. Only **full** AACP frames (`04 00 04 00 …`); truncated CDC previews (`…` / `...`) are skipped. `USB_SPK_OPEN` / `USB_STREAMING` are stubs from last `@STATUS` `spk=` / `stream=` (or HID flags2). `EXPECT` lines are omitted — fill by hand after a steal capture.
-- **Dual-connect** strip: owns, AACP, A2DP, duck, reclaim, paused (anti-ping-pong), USB speaker / streaming, last `0x0E` peer.
+- **Dual-connect** strip: owns, AACP, A2DP, duck, reclaim, paused (anti-ping-pong), **softexcl / SX phase**, USB speaker / streaming, last `0x0E` peer. CDC **softexcl on|off** button (default on).
 - **Balance / Align** strip: ear L/R (HID or `@STATUS`), `spk_misalign` / `spk_rem` / `spk_half` / `spk_swap`, and USB L vs R dBFS bars from `spk_l=` `spk_r=`. **Connect HID, then CDC console** so the meters update (`status` every 2 s beside HID). Warn styling: misalign climbing, ear R off while L on (or vice versa), `|L−R| ≥ 6 dB` while both channels are louder than `-50 dBFS`. HID-only: ear chips work; L/R USB PCM bars stay `—` until CDC is attached.
 
 **How to capture a steal dump:** Connect TinyUSB BT (HID), then **CDC console** → pick USBPods Max Console. Quiet sends `aacpdump on`. Play audio on the dongle, steal from the iPhone, then **Export .aacp**. Drop the file into `tests/fixtures/` and add `EXPECT` lines.
@@ -115,15 +115,18 @@ GitHub Pages (`web/index.html`) can connect WebHID / Web Serial and:
 
 ## CDC text
 
-Line-oriented, `\r` or `\n`. Extra verbs: `rename`, `crown`, `autoans`, `chime`, `adaptvol`, `sleep`, `listen`, `ear`, `gestures`, `hold`, `autocon`, **`aacpdump`**.
+Line-oriented, `\r` or `\n`. Extra verbs: `rename`, `crown`, `autoans`, `chime`, `adaptvol`, `sleep`, `listen`, `ear`, `gestures`, `hold`, `autocon`, **`softexcl`**, **`aacpdump`**.
+
+`softexcl on|off` — soft exclusive (default **on**). While USB wants the sink, try to drop extra Pico HCI ACLs that are not the AirPods Max; keep the iPhone **paired**. USB idle + 2 s grace allows the phone back. Reclaim / `0x10` run unless kick actually dropped a Pico phone ACL (`sxkick=1`). Max-only dual-connect still fights. Quiet’s Dual-connect strip has a CDC toggle. HID flags2 is full — this is serial/`@STATUS` only.
 
 `aacpdump on|off` — full hex for non-dual AACP packets. Dual-connect / smart-routing opcodes **`0x0E` / `0x10` / `0x11` / `0x2E`** (and control `0x06` OWNS / `0x20`) always print **complete** frames, even when `aacpdump` is off. Other hex dumps stay at a 24-byte preview unless `aacpdump on`. Quiet’s CDC console turns `aacpdump on` when the port opens. No UF2 on Pages; dump-replay wants these full lines, not the old 24-byte preview.
 
 ```
-@STATUS a2dp=1 aacp=1 mic=0 gain=6 slot=1 mute=0 … owns=1 duck=0 autocon=1 allowauto=0 earen=1 reclaim=0 paused=0 spk=1 stream=1 peer=aa:bb:cc:dd:ee:ff … last19=05 01 name=AirPods Max … spk_misalign=0 spk_rem=0 spk_half=0 spk_swap=0 spk_l=-12 spk_r=-13
+@STATUS a2dp=1 aacp=1 mic=0 gain=6 slot=1 mute=0 … owns=1 duck=0 autocon=1 allowauto=0 earen=1 reclaim=0 paused=0 spk=1 stream=1 peer=aa:bb:cc:dd:ee:ff softexcl=1 sxphase=hold sxkick=0 … last19=05 01 name=AirPods Max … spk_misalign=0 spk_rem=0 spk_half=0 spk_swap=0 spk_l=-12 spk_r=-13
 @GAIN 6
 [AACP] 0x000E audio-src-resp n=13: 04 00 04 00 0E 00 FF EE DD CC BB AA 02
 [AACP] tx n=11: 04 00 04 00 09 00 06 01 00 00 00
+[SX] phase idle → hold (spk=1 stream=1)
 ```
 
 ## Mic gain

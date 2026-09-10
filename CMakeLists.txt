@@ -64,6 +64,7 @@ add_executable(${PROJECT_NAME}
     src/btstack/btstack_avdtp_source.c
     src/btstack/btstack_hci.c
     src/btstack/btstack_aacp.c
+    src/btstack/softexcl.c
     src/btstack/aacp_mic_dec.c
     src/tinyusb/uac.c
     src/tinyusb/usb_descriptors.c

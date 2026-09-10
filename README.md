@@ -85,7 +85,7 @@ Enable Pages: repo Settings → Pages → GitHub Actions (workflow [`.github/wor
 screen /dev/cu.usbmodem* 115200
 ```
 
-`h` help · `s` status · `gain 0-24` · `pair` · `disconnect` · `reconnect` · `slot 1|2` · `anc off|anc|trans|adaptive` · `ca on|off`
+`h` help · `s` status · `gain 0-24` · `pair` · `disconnect` · `reconnect` · `slot 1|2` · `anc off|anc|trans|adaptive` · `ca on|off` · `softexcl on|off`
 
 Logs (`[AACP]` `[MIC]` `[DEC]`) share this port. Attach them when filing issues.
 
