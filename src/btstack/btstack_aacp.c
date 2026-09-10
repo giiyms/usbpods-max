@@ -30,6 +30,7 @@
 #include "btstack_avdtp_source.h"
 #include "aacp_ear.h"
 #include "aacp_mic_dec.h"
+#include "softexcl.h"
 #include "../hid_consumer.h"
 #include "../pico_w_led.h"
 
@@ -552,6 +553,18 @@ void aacp_get_audio_src(uint8_t mac[6], uint8_t *type, bool *known) {
     }
 }
 
+int aacp_get_connected_device_count(void) {
+    return aacp_conn_dev_count;
+}
+
+bool aacp_get_connected_device(int idx, uint8_t mac[6], uint8_t *info1, uint8_t *info2) {
+    if (idx < 0 || idx >= aacp_conn_dev_count) return false;
+    if (mac) memcpy(mac, aacp_conn_devs[idx].mac, 6);
+    if (info1) *info1 = aacp_conn_devs[idx].info1;
+    if (info2) *info2 = aacp_conn_devs[idx].info2;
+    return true;
+}
+
 static uint8_t aacp_ca_duck_from_level(uint8_t level) {
     // AAP Definitions 0x004B: 01/02 started (duck a lot), 03 stopped (restore),
     // 08/09 normal, intermediate interpolate. Do not touch the mic path.
@@ -783,7 +796,12 @@ static void aacp_handle_control(const uint8_t *pkt, uint16_t size) {
                 aacp_owns = v;
                 /* Lost ownership after we claimed — peer playing. */
                 if (prev == DUAL_OWNS_CLAIM_VAL && v == DUAL_OWNS_GIVEUP_VAL) {
-                    avdtp_dual_connect_note_they_own();
+                    if (softexcl_hold_blocks_giveup()) {
+                        printf("[SX] owns=00 while HOLD — kick phone, skip they-own\n");
+                        softexcl_kick_now();
+                    } else {
+                        avdtp_dual_connect_note_they_own();
+                    }
                 }
                 break;
             }
@@ -899,20 +917,31 @@ static void aacp_handle_control(const uint8_t *pkt, uint16_t size) {
                        src.mac[0], src.mac[1], src.mac[2],
                        src.mac[3], src.mac[4], src.mac[5],
                        (unsigned) src.type);
+                softexcl_note_audio_src(src.mac, src.type);
                 /* Give-up uses owns=00 / reclaim stop; need local MAC to
                  * compare before acting on 0x0E (no invented hijack). */
+                if (softexcl_hold_blocks_giveup()) {
+                    uint8_t self_mac[6];
+                    aacp_get_self_mac(self_mac);
+                    if (dual_connect_0e_means_they_own(&src, self_mac)) {
+                        printf("[SX] 0x0E they-own while HOLD — kick, skip give-up\n");
+                        softexcl_kick_now();
+                    }
+                }
             }
         }
         if (opcode == 0x0011) {
             // LibrePods AACPManager SMART_ROUTING_RESP: SetOwnershipToFalse
             // → pause, OWNS=00, they-own. Do not immediately reclaim / 0x10.
+            // Soft exclusive HOLD: kick the phone instead of giving up.
             dual_connect_0x11_decision_t d = dual_connect_decide_0x11(
                     pkt, size,
                     avdtp_usb_speaker_is_open(),
                     avdtp_usb_is_streaming());
             if (d.recognized) {
                 uint8_t sender[6];
-                if (dual_connect_parse_0x11_sender(pkt, size, sender)) {
+                bool have_sender = dual_connect_parse_0x11_sender(pkt, size, sender);
+                if (have_sender) {
                     printf("[AACP] 0x11 SetOwnershipToFalse from "
                            "%02X:%02X:%02X:%02X:%02X:%02X reverse=%u "
                            "pause=%u (THEY_OWN, no hijack)\n",
@@ -920,23 +949,29 @@ static void aacp_handle_control(const uint8_t *pkt, uint16_t size) {
                            sender[3], sender[4], sender[5],
                            (unsigned) d.reverse_banner,
                            (unsigned) d.pause_media);
+                    softexcl_note_peer_mac(sender);
                 } else {
                     printf("[AACP] 0x11 SetOwnershipToFalse reverse=%u "
                            "pause=%u (THEY_OWN, no hijack)\n",
                            (unsigned) d.reverse_banner,
                            (unsigned) d.pause_media);
                 }
-                if (d.send_owns_giveup) {
-                    uint8_t giveup[DUAL_CTRL_FRAME_LEN];
-                    dual_connect_build_owns_giveup(giveup);
-                    aacp_tx_enqueue(giveup, DUAL_CTRL_FRAME_LEN);
-                    aacp_owns = DUAL_OWNS_GIVEUP_VAL;
+                if (softexcl_hold_blocks_giveup()) {
+                    printf("[SX] 0x11 while HOLD — kick phone, skip give-up\n");
+                    softexcl_kick_now();
+                } else {
+                    if (d.send_owns_giveup) {
+                        uint8_t giveup[DUAL_CTRL_FRAME_LEN];
+                        dual_connect_build_owns_giveup(giveup);
+                        aacp_tx_enqueue(giveup, DUAL_CTRL_FRAME_LEN);
+                        aacp_owns = DUAL_OWNS_GIVEUP_VAL;
+                    }
+                    if (d.pause_media) {
+                        hid_consumer_pause();
+                        printf("[AACP] 0x11 → HID Pause (they own, anti-ping-pong)\n");
+                    }
+                    avdtp_dual_connect_note_they_own();
                 }
-                if (d.pause_media) {
-                    hid_consumer_pause();
-                    printf("[AACP] 0x11 → HID Pause (they own, anti-ping-pong)\n");
-                }
-                avdtp_dual_connect_note_they_own();
             }
         }
         aacp_dump_hex(opcode == 0x000D ? "0x000D audio-src-req" :
@@ -963,6 +998,10 @@ static void aacp_handle_control(const uint8_t *pkt, uint16_t size) {
                 memcpy(aacp_conn_devs, devs, (size_t)n * sizeof(devs[0]));
                 aacp_conn_dev_count = n;
                 printf("[AACP] 0x2E connected-devices count=%d\n", n);
+                softexcl_note_connected_devices(aacp_conn_devs, n);
+                if (softexcl_hold_blocks_giveup()) {
+                    softexcl_kick_now();
+                }
                 uint8_t self_mac[6];
                 aacp_get_self_mac(self_mac);
                 for (int i = 0; i < n; i++) {
@@ -1057,10 +1096,11 @@ static void aacp_get_self_mac(uint8_t out[6]) {
 /* LibrePods takeOver order after OWNS: media_info + showUI + hijack to each
  * 0x2E peer ≠ self. Only when USB wants sink and anti-ping-pong is clear. */
 static void aacp_send_smart_routing_hijack(bool streaming) {
-    if (!aacp_sr_should_send_hijack(avdtp_usb_speaker_is_open(),
-                                    avdtp_usb_is_streaming(),
-                                    avdtp_we_paused_after_giveup())) {
-        printf("[AACP] 0x10 hijack skipped (USB_IDLE or anti-ping-pong)\n");
+    if (!aacp_sr_should_send_hijack_gated(softexcl_enabled(),
+                                          avdtp_usb_speaker_is_open(),
+                                          avdtp_usb_is_streaming(),
+                                          avdtp_we_paused_after_giveup())) {
+        printf("[AACP] 0x10 hijack skipped (softexcl, USB_IDLE, or anti-ping-pong)\n");
         return;
     }
     uint8_t self_mac[6];

@@ -5,7 +5,9 @@
 // devices, 0x11 SMART_ROUTING_RESP (SetOwnershipToFalse). Anti-ping-pong:
 // librepods-org#724 (i_paused_the_media — auto-resume after give-up must not
 // reclaim). 0x10 smart-routing builders live in aacp_smart_routing.h
-// (verbatim LibrePods AACPManager.kt). Do not invent opcodes.
+// (verbatim LibrePods AACPManager.kt). Soft exclusive (default on):
+// dual_softexcl_* drops extra ACL while USB wants the sink; reclaim / 0x10
+// fight path is the fallback when softexcl is off. Do not invent opcodes.
 
 #ifndef USBPODS_DUAL_CONNECT_POLICY_H
 #define USBPODS_DUAL_CONNECT_POLICY_H
@@ -263,6 +265,159 @@ static inline bool dual_connect_should_clear_anti_ping_pong(
         bool usb_spk_open_rising) {
     if (!we_paused_after_giveup) return false;
     return usb_streaming_rising || usb_spk_open_rising;
+}
+
+// --- Soft exclusive (keep iPhone paired; drop extra ACL while USB wants sink) ---
+// Default ON. Fight path (AVDTP reclaim / LibrePods 0x10 hijack) is the
+// fallback when softexcl is off. Never Forget / wipe keys / HCI-drop the Max.
+//
+// Phase: IDLE → HOLD on USB wants sink; HOLD → GRACE on USB idle; GRACE →
+// IDLE after DUAL_SOFTEXCL_GRACE_MS if still idle. USB wants during GRACE
+// returns to HOLD immediately. Drop/refuse the non-Max peer only in HOLD.
+
+#define DUAL_SOFTEXCL_GRACE_MS  2000u
+
+typedef enum {
+    DUAL_SX_IDLE = 0,
+    DUAL_SX_HOLD,
+    DUAL_SX_GRACE,
+} dual_softexcl_phase_t;
+
+typedef struct {
+    bool enabled;
+    dual_softexcl_phase_t phase;
+    uint32_t grace_until_ms;
+} dual_softexcl_t;
+
+// Flash byte: 1=on, 2=off; 0x00 / 0xFF / anything else → on (factory default).
+static inline bool dual_softexcl_flash_means_on(uint8_t b) {
+    return b != 2u;
+}
+
+static inline void dual_softexcl_init(dual_softexcl_t *s, bool enabled) {
+    if (!s) return;
+    s->enabled = enabled;
+    s->phase = DUAL_SX_IDLE;
+    s->grace_until_ms = 0;
+}
+
+static inline void dual_softexcl_set_enabled(dual_softexcl_t *s, bool enabled) {
+    if (!s) return;
+    s->enabled = enabled;
+    if (!enabled) {
+        s->phase = DUAL_SX_IDLE;
+        s->grace_until_ms = 0;
+    }
+}
+
+static inline const char *dual_softexcl_phase_name(dual_softexcl_phase_t p) {
+    switch (p) {
+        case DUAL_SX_HOLD:  return "hold";
+        case DUAL_SX_GRACE: return "grace";
+        default:            return "idle";
+    }
+}
+
+static inline bool dual_softexcl_should_drop_peer(const dual_softexcl_t *s) {
+    return s && s->enabled && s->phase == DUAL_SX_HOLD;
+}
+
+// Do not honor 0x11 / owns=00 / 0x0E they-own give-up while HOLD — that
+// would undo exclusive. Firmware kicks the phone instead.
+static inline bool dual_softexcl_should_honor_giveup(const dual_softexcl_t *s) {
+    return !dual_softexcl_should_drop_peer(s);
+}
+
+// Steal reclaim / 0x10 hijack only when softexcl is off (fight fallback).
+static inline bool dual_connect_should_fight_on_steal(bool softexcl_on,
+                                                     bool usb_spk_open,
+                                                     bool is_usb_streaming,
+                                                     bool we_paused_after_giveup) {
+    if (softexcl_on) return false;
+    return dual_connect_should_reclaim_on_steal(usb_spk_open, is_usb_streaming,
+                                                we_paused_after_giveup);
+}
+
+static inline dual_softexcl_phase_t dual_softexcl_step(dual_softexcl_t *s,
+                                                      bool usb_wants_sink,
+                                                      uint32_t now_ms) {
+    if (!s) return DUAL_SX_IDLE;
+    if (!s->enabled) {
+        s->phase = DUAL_SX_IDLE;
+        s->grace_until_ms = 0;
+        return DUAL_SX_IDLE;
+    }
+    if (usb_wants_sink) {
+        s->phase = DUAL_SX_HOLD;
+        s->grace_until_ms = 0;
+        return DUAL_SX_HOLD;
+    }
+    if (s->phase == DUAL_SX_HOLD) {
+        s->phase = DUAL_SX_GRACE;
+        s->grace_until_ms = now_ms + DUAL_SOFTEXCL_GRACE_MS;
+        return DUAL_SX_GRACE;
+    }
+    if (s->phase == DUAL_SX_GRACE) {
+        if ((int32_t)(now_ms - s->grace_until_ms) >= 0) {
+            s->phase = DUAL_SX_IDLE;
+            s->grace_until_ms = 0;
+            return DUAL_SX_IDLE;
+        }
+        return DUAL_SX_GRACE;
+    }
+    return DUAL_SX_IDLE;
+}
+
+static inline bool dual_softexcl_mac_eq(const uint8_t a[6], const uint8_t b[6]) {
+    return a && b && memcmp(a, b, 6) == 0;
+}
+
+static inline bool dual_softexcl_mac_nonzero(const uint8_t mac[6]) {
+    static const uint8_t z[6] = {0, 0, 0, 0, 0, 0};
+    static const uint8_t f[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    if (!mac) return false;
+    if (memcmp(mac, z, 6) == 0) return false;
+    if (memcmp(mac, f, 6) == 0) return false;
+    return true;
+}
+
+// Self (Pico) and the Max headset must never be HCI-disconnected.
+static inline bool dual_softexcl_mac_is_protected(const uint8_t mac[6],
+                                                  const uint8_t self[6],
+                                                  const uint8_t max_addr[6]) {
+    if (!dual_softexcl_mac_nonzero(mac)) return true;
+    if (dual_softexcl_mac_nonzero(self) && dual_softexcl_mac_eq(mac, self)) {
+        return true;
+    }
+    if (dual_softexcl_mac_nonzero(max_addr) && dual_softexcl_mac_eq(mac, max_addr)) {
+        return true;
+    }
+    return false;
+}
+
+// Prefer 0x0E MEDIA/CALL peer ≠ self ≠ Max; else first 0x2E record that
+// is not protected. Returns false if no phone-like peer is known.
+static inline bool dual_softexcl_pick_phone_peer(const dual_audio_source_t *src,
+                                                 bool src_known,
+                                                 const dual_connected_device_t *devs,
+                                                 int ndevs,
+                                                 const uint8_t self[6],
+                                                 const uint8_t max_addr[6],
+                                                 uint8_t out[6]) {
+    if (!out) return false;
+    if (src_known && src &&
+        (src->type == DUAL_AUDIO_SRC_MEDIA || src->type == DUAL_AUDIO_SRC_CALL) &&
+        !dual_softexcl_mac_is_protected(src->mac, self, max_addr)) {
+        memcpy(out, src->mac, 6);
+        return true;
+    }
+    if (!devs || ndevs <= 0) return false;
+    for (int i = 0; i < ndevs; i++) {
+        if (dual_softexcl_mac_is_protected(devs[i].mac, self, max_addr)) continue;
+        memcpy(out, devs[i].mac, 6);
+        return true;
+    }
+    return false;
 }
 
 #endif // USBPODS_DUAL_CONNECT_POLICY_H

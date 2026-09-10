@@ -48,6 +48,7 @@ typedef struct {
     uint8_t sleep_det;    // 1 on, 2 off
     uint8_t crown_dir;    // 1 reversed, 2 default
     uint8_t listen_mask;  // 0x1A bitmask
+    uint8_t softexcl;     // 1 on, 2 off; 0/0xFF → on
 } host_prefs_t;
 
 void read_host_prefs_flash(host_prefs_t *out);

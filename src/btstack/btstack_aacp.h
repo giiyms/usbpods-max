@@ -74,6 +74,10 @@ const char *aacp_get_dev_fw(void);
 // Last 0x0E audio-src (display-order MAC). known=false until the first parse.
 void aacp_get_audio_src(uint8_t mac[6], uint8_t *type, bool *known);
 
+// Last 0x2E connected-devices list (hosts on the Max: self + iPhone).
+int aacp_get_connected_device_count(void);
+bool aacp_get_connected_device(int idx, uint8_t mac[6], uint8_t *info1, uint8_t *info2);
+
 // CDC `aacpdump on|off`: full hex for non-dual packets. Dual-connect
 // opcodes (0x0E/0x10/0x11/0x2E) always dump complete frames.
 void aacp_set_dump_full(bool on);

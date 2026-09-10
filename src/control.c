@@ -20,6 +20,7 @@
 #include "btstack/btstack_avdtp_source.h"
 #include "btstack/btstack_hci.h"
 #include "btstack/btstack_aacp.h"
+#include "btstack/softexcl.h"
 #include "tinyusb/uac.h"
 
 // ---- latched requests (USB IRQ → main loop) ----
@@ -162,6 +163,7 @@ void control_print_status_human(void) {
            "owns=%u duck=%u autocon=%u allowauto=%u earen=%u gestures=%u hold=%u "
            "crown=%u autoans=%u chime=%u adaptvol=%u sleep=%u listen=%u "
            "reclaim=%u paused=%u spk=%u stream=%u peer=%s "
+           "softexcl=%u sxphase=%s "
            "last19=%s vol=%u name=%s model=%s serial=%s fw=%s findmy=unsupported "
            "spk_misalign=%lu spk_rem=%u spk_half=%lu spk_swap=%u spk_l=%d spk_r=%d "
            "addr=%02x:%02x:%02x:%02x:%02x:%02x\n",
@@ -181,6 +183,8 @@ void control_print_status_human(void) {
            avdtp_usb_speaker_is_open() ? 1 : 0,
            avdtp_usb_is_streaming() ? 1 : 0,
            peer,
+           softexcl_enabled() ? 1 : 0,
+           softexcl_phase_str(),
            aacp_get_last19_hex()[0] ? aacp_get_last19_hex() : "-",
            (unsigned) get_bt_volume(),
            aacp_get_dev_name()[0] ? aacp_get_dev_name() : "-",
@@ -217,6 +221,7 @@ static void print_help(void) {
     printf("  gestures <mask>       Raw Gestures 0x39\n");
     printf("  hold noise|siri       ClickHoldMode 0x16\n");
     printf("  autocon on|off        Connect Automatically 0x20\n");
+    printf("  softexcl on|off       soft exclusive (default on): USB sink drops extra ACL, keeps iPhone paired\n");
     printf("  aacpdump on|off       full CDC hex for non-dual AACP (0x0E/0x10/0x11/0x2E always full)\n");
     printf("Host Bluetooth must NOT own the headset or A2DP goes silent.\n");
 }
@@ -420,6 +425,22 @@ void control_process_line(char *line) {
         else req_autoconn = (uint8_t) v;
         return;
     }
+    if (!icmp(line, "softexcl")) {
+        if (!*arg) {
+            printf("softexcl %s sxphase=%s (default on; iPhone stays paired)\n",
+                   softexcl_enabled() ? "on" : "off", softexcl_phase_str());
+            return;
+        }
+        int v = parse_onoff(arg);
+        if (!v) {
+            printf("softexcl: on | off\n");
+            return;
+        }
+        softexcl_set_enabled(v == 1);
+        printf("softexcl %s sxphase=%s\n",
+               softexcl_enabled() ? "on" : "off", softexcl_phase_str());
+        return;
+    }
     if (!icmp(line, "aacpdump")) {
         if (!*arg) {
             printf("aacpdump %s (dual-connect 0x0E/0x10/0x11/0x2E always full)\n",
@@ -520,15 +541,18 @@ bool control_handle_hid_cmd(uint8_t const *buf, uint16_t len) {
 static void persist_if_idle(void) {
     bool allow = !aacp_mic_active() && !aacp_is_connected();
     if (!allow) return;
-    if (aacp_prefs_dirty()) {
+    if (aacp_prefs_dirty() || softexcl_prefs_dirty()) {
         host_prefs_t prefs;
         aacp_prefs_fill(&prefs.auto_ans, &prefs.chime, &prefs.adapt_vol,
                         &prefs.sleep_det, &prefs.crown_dir, &prefs.listen_mask);
+        prefs.softexcl = softexcl_flash_value();
         if (write_host_settings_flash(mic_gain_get_db(), &prefs)) {
-            printf("[NVS] persisted gain=%u autoans=%u chime=%u adapt=%u sleep=%u crown=%u listen=0x%02x\n",
+            printf("[NVS] persisted gain=%u autoans=%u chime=%u adapt=%u sleep=%u crown=%u listen=0x%02x softexcl=%u\n",
                    (unsigned) mic_gain_get_db(), prefs.auto_ans, prefs.chime,
-                   prefs.adapt_vol, prefs.sleep_det, prefs.crown_dir, prefs.listen_mask);
+                   prefs.adapt_vol, prefs.sleep_det, prefs.crown_dir, prefs.listen_mask,
+                   (unsigned) prefs.softexcl);
             aacp_prefs_clear_dirty();
+            softexcl_prefs_clear_dirty();
             mic_gain_persist_ack();
         } else {
             printf("[NVS] persist FAILED\n");

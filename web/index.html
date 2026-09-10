@@ -1651,9 +1651,12 @@
         <div class="hint-strip dual-strip" id="dualStrip">
           <div class="hint-strip-head">
             <span class="section-title">Dual-connect</span>
-            <span class="hint-strip-note">Owns / AACP / A2DP / duck plus reclaim, paused (anti-ping-pong), USB speaker, and last 0x0E peer — HID flags2 and <code>@STATUS</code>. No invented opcodes.</span>
+            <span class="hint-strip-note">Soft exclusive (default on) drops extra ACL while USB plays and keeps the iPhone paired. Fight path (reclaim / 0x10) is <code>softexcl off</code>. Owns / reclaim / USB / 0x0E peer from HID flags2 and <code>@STATUS</code>.</span>
           </div>
           <div class="hint-chips" id="dualChips"></div>
+          <div class="diag-log-actions" style="margin-top:8px">
+            <button class="btn-ghost" id="btnSoftexcl" type="button" disabled title="CDC: softexcl on|off. Default on. USB sink holds exclusive; iPhone stays paired. Off restores reclaim/0x10 fight.">softexcl —</button>
+          </div>
         </div>
 
         <div class="hint-strip" id="balanceStrip">
@@ -2228,6 +2231,8 @@
         dec_err: (s.dec_err === undefined || s.dec_err === "" || Number.isNaN(Number(s.dec_err))) ? "—" : String(s.dec_err),
         reclaim: s.reclaim ? "yes" : (s.reclaim === false || s.reclaim === 0 ? "no" : "—"),
         paused: s.paused ? "yes" : (s.paused === false || s.paused === 0 ? "no" : "—"),
+        softexcl: s.softexcl === undefined ? "—" : (Number(s.softexcl) ? "on" : "off"),
+        sxphase: s.sxphase || "—",
         spk: s.spk === undefined ? "—" : (s.spk ? "open" : "closed"),
         usbstream: s.usbstream === undefined ? "—" : (s.usbstream ? "1" : "0"),
         peer: dashName(s.peer),
@@ -2239,7 +2244,7 @@
         spk_r: (s.spk_r === undefined || Number.isNaN(Number(s.spk_r))) ? "—" : String(s.spk_r)
       };
     }
-    const SNAP_KEYS = ["a2dp", "aacp", "mic", "duck", "ear_l", "ear_r", "ear", "owns", "reclaim", "paused", "spk", "usbstream", "peer", "addr", "vol", "mute", "last19", "name", "gain", "noise", "ca", "dec_err", "spk_misalign", "spk_rem", "spk_half", "spk_swap", "spk_l", "spk_r"];
+    const SNAP_KEYS = ["a2dp", "aacp", "mic", "duck", "ear_l", "ear_r", "ear", "owns", "reclaim", "paused", "softexcl", "sxphase", "spk", "usbstream", "peer", "addr", "vol", "mute", "last19", "name", "gain", "noise", "ca", "dec_err", "spk_misalign", "spk_rem", "spk_half", "spk_swap", "spk_l", "spk_r"];
     function formatSnap(snap) {
       return SNAP_KEYS.map((k) => k + "=" + snap[k]).join(" ");
     }
@@ -2263,7 +2268,7 @@
       if (changes.length) {
         let kind = "info";
         if (snap.ear !== prev.ear) kind = "ear";
-        else if (snap.owns !== prev.owns || snap.reclaim !== prev.reclaim || snap.paused !== prev.paused)
+        else if (snap.owns !== prev.owns || snap.reclaim !== prev.reclaim || snap.paused !== prev.paused || snap.softexcl !== prev.softexcl || snap.sxphase !== prev.sxphase)
           kind = "dual";
         else if ((snap.a2dp === "down" && prev.a2dp === "up") || (snap.aacp === "down" && prev.aacp === "up") || (snap.mic === "off" && prev.mic === "on")) kind = "down";
         else if ((snap.a2dp === "up" && prev.a2dp === "down") || (snap.aacp === "up" && prev.aacp === "down") || (snap.mic === "on" && prev.mic === "off")) kind = "up";
@@ -2342,6 +2347,8 @@
       const duck = snap ? snap.duck : "—";
       const reclaim = snap ? snap.reclaim : "—";
       const paused = snap ? snap.paused : "—";
+      const softexcl = snap ? snap.softexcl : "—";
+      const sxphase = snap ? snap.sxphase : "—";
       const spk = snap ? snap.spk : "—";
       const usbstream = snap ? snap.usbstream : "—";
       const peer = snap ? snap.peer : "—";
@@ -2352,6 +2359,8 @@
         chip("Duck", duck, duck === "ducking" ? "warn" : "idle"),
         chip("Reclaim", reclaim, reclaim === "yes" ? "warn" : "idle"),
         chip("Paused", paused, paused === "yes" ? "warn" : "idle"),
+        chip("Softexcl", softexcl, softexcl === "on" ? "ok" : (softexcl === "off" ? "warn" : "idle")),
+        chip("SX", sxphase, sxphase === "hold" ? "ok" : (sxphase === "grace" ? "warn" : "idle")),
         chip("USB spk", spk, spk === "open" ? "ok" : "idle"),
         chip("USB stream", usbstream, usbstream === "1" ? "ok" : "idle"),
         chip("Peer 0x0E", peer, peer && peer !== "—" ? "warn" : "idle"),
@@ -2584,7 +2593,7 @@
 
     function applyStatus(s) {
       if (currentStatus) {
-        const keep = ["peer", "vol", "spk_l", "spk_r", "spk_misalign", "spk_rem", "spk_half", "spk_swap", "name", "model", "serial", "fw"];
+        const keep = ["peer", "vol", "spk_l", "spk_r", "spk_misalign", "spk_rem", "spk_half", "spk_swap", "name", "model", "serial", "fw", "softexcl", "sxphase"];
         for (let i = 0; i < keep.length; i++) {
           const k = keep[i];
           if (s[k] === undefined) s[k] = currentStatus[k];
@@ -2624,6 +2633,7 @@
       setText("fOwns", s.owns === 1 || s.owns === true ? "yes" : (s.owns === 2 || s.owns === false ? "no" : "—"));
       setText("fReclaim", s.reclaim ? "yes" : (s.reclaim === false || s.reclaim === 0 ? "no" : "—"));
       setText("fPaused", s.paused ? "yes" : (s.paused === false || s.paused === 0 ? "no" : "—"));
+      paintSoftexclBtn(s);
       setText("fPeer", dashName(s.peer));
       setText("fAddr", s.addr || "—");
       setText("fRadioBadge", "Slot " + (s.slot || "—") + " · Owns: " + (s.owns === 1 || s.owns === true ? "yes" : (s.owns === 2 ? "no" : "—")));
@@ -2720,6 +2730,8 @@
         adaptvol: Number(kv.adaptvol), sleep: Number(kv.sleep), listen: Number(kv.listen),
         reclaim: kv.reclaim !== undefined ? kv.reclaim === "1" : undefined,
         paused: kv.paused !== undefined ? kv.paused === "1" : undefined,
+        softexcl: kv.softexcl !== undefined ? Number(kv.softexcl) : undefined,
+        sxphase: kv.sxphase,
         spk: kv.spk !== undefined ? kv.spk === "1" : undefined,
         usbstream: kv.stream !== undefined ? kv.stream === "1" : undefined,
         peer: kv.peer && kv.peer !== "-" ? kv.peer : undefined,
@@ -2802,6 +2814,20 @@
       if (!b) return;
       b.textContent = cdcAttached ? "CDC live" : "CDC console";
       b.classList.toggle("is-on", !!cdcAttached);
+      paintSoftexclBtn(currentStatus);
+    }
+
+    function paintSoftexclBtn(s) {
+      const b = $("btnSoftexcl");
+      if (!b) return;
+      b.disabled = !cdcAttached;
+      const on = s && s.softexcl !== undefined && Number(s.softexcl) === 1;
+      const off = s && s.softexcl !== undefined && Number(s.softexcl) === 0;
+      const phase = s && s.sxphase ? String(s.sxphase) : "";
+      if (on) b.textContent = phase && phase !== "idle" ? ("softexcl " + phase) : "softexcl on";
+      else if (off) b.textContent = "softexcl off";
+      else b.textContent = "softexcl —";
+      b.classList.toggle("is-on", !!on);
     }
 
     function takeCdcLines() {
@@ -3324,6 +3350,20 @@
       } catch (e) {
         setErr(e.message);
         log("CDC console failed: " + e.message, "err");
+      }
+    };
+    const btnSx = $("btnSoftexcl");
+    if (btnSx) btnSx.onclick = async () => {
+      if (!cdcAttached) {
+        setErr("Attach CDC console to toggle softexcl");
+        return;
+      }
+      const on = currentStatus && Number(currentStatus.softexcl) === 1;
+      try {
+        await sendSerial(on ? "softexcl off" : "softexcl on");
+        await sendSerial("status");
+      } catch (e) {
+        setErr(e.message);
       }
     };
     $("btnExportAacp").onclick = () => {

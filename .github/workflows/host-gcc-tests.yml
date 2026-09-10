@@ -15,6 +15,8 @@ jobs:
           gcc --version
           gcc -I. -O2 -o /tmp/dual_connect_policy_test tests/dual_connect_policy_test.c
           /tmp/dual_connect_policy_test
+          gcc -I. -O2 -o /tmp/softexcl_policy_test tests/softexcl_policy_test.c
+          /tmp/softexcl_policy_test
           gcc -I. -O2 -o /tmp/aacp_smart_routing_test tests/aacp_smart_routing_test.c
           /tmp/aacp_smart_routing_test
           gcc -I. -O2 -o /tmp/aacp_dump_replay_test tests/aacp_dump_replay_test.c

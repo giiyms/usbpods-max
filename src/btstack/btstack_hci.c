@@ -9,6 +9,7 @@
 
 #include "btstack_hci.h"
 #include "btstack_avdtp_source.h"
+#include "softexcl.h"
 #include "../pico_w_led.h"
 
 
@@ -110,6 +111,20 @@ static void hci_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *p
                 printf("No Bluetooth speakers found, scanning again...\n");
                 gap_inquiry_start(A2DP_SOURCE_DEMO_INQUIRY_DURATION_1280MS);
             }
+            break;
+        case HCI_EVENT_CONNECTION_COMPLETE: {
+            bd_addr_t peer;
+            hci_event_connection_complete_get_bd_addr(packet, peer);
+            softexcl_hci_connection_complete(
+                    peer,
+                    hci_event_connection_complete_get_connection_handle(packet),
+                    hci_event_connection_complete_get_status(packet),
+                    hci_event_connection_complete_get_link_type(packet));
+            break;
+        }
+        case HCI_EVENT_DISCONNECTION_COMPLETE:
+            softexcl_hci_disconnection_complete(
+                    hci_event_disconnection_complete_get_connection_handle(packet));
             break;
         default:
             break;
