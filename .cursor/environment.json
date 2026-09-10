@@ -1,0 +1,11 @@
+{
+  "name": "USBPods Max",
+  "install": "bash .cursor/install.sh",
+  "terminals": [
+    {
+      "name": "web-settings-page",
+      "command": "cd /workspace/web && python3 -m http.server 8000"
+    }
+  ],
+  "ports": [8000]
+}
