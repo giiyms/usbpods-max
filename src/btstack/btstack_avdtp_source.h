@@ -66,6 +66,11 @@ void avdtp_reclaim_hold_set(bool hold);
 // Arms anti-ping-pong (we_paused_after_giveup) and stops the A2DP send timer.
 void avdtp_dual_connect_note_they_own(void);
 
+// A peer claimed the Max while USB still wants it. Soft-exclusive first tries
+// to drop a non-Max Pico ACL; if none was dropped/refused, immediately enter
+// the existing AVDTP reclaim + LibrePods 0x10 + host-session-wake path.
+void avdtp_dual_connect_reclaim_on_steal(void);
+
 // Post-reclaim HID Play / media start gate (we_paused_for_steal).
 bool avdtp_allow_play_after_reclaim(void);
 

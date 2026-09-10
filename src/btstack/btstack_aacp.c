@@ -797,8 +797,8 @@ static void aacp_handle_control(const uint8_t *pkt, uint16_t size) {
                 /* Lost ownership after we claimed — peer playing. */
                 if (prev == DUAL_OWNS_CLAIM_VAL && v == DUAL_OWNS_GIVEUP_VAL) {
                     if (softexcl_hold_blocks_giveup()) {
-                        printf("[SX] owns=00 while HOLD — kick phone, skip they-own\n");
-                        softexcl_kick_now();
+                        printf("[SX] owns=00 while HOLD — kick Pico ACL or reclaim\n");
+                        avdtp_dual_connect_reclaim_on_steal();
                     } else {
                         avdtp_dual_connect_note_they_own();
                     }
@@ -924,8 +924,8 @@ static void aacp_handle_control(const uint8_t *pkt, uint16_t size) {
                     uint8_t self_mac[6];
                     aacp_get_self_mac(self_mac);
                     if (dual_connect_0e_means_they_own(&src, self_mac)) {
-                        printf("[SX] 0x0E they-own while HOLD — kick, skip give-up\n");
-                        softexcl_kick_now();
+                        printf("[SX] 0x0E they-own while HOLD — kick Pico ACL or reclaim\n");
+                        avdtp_dual_connect_reclaim_on_steal();
                     }
                 }
             }
@@ -957,8 +957,8 @@ static void aacp_handle_control(const uint8_t *pkt, uint16_t size) {
                            (unsigned) d.pause_media);
                 }
                 if (softexcl_hold_blocks_giveup()) {
-                    printf("[SX] 0x11 while HOLD — kick phone, skip give-up\n");
-                    softexcl_kick_now();
+                    printf("[SX] 0x11 while HOLD — kick Pico ACL or reclaim\n");
+                    avdtp_dual_connect_reclaim_on_steal();
                 } else {
                     if (d.send_owns_giveup) {
                         uint8_t giveup[DUAL_CTRL_FRAME_LEN];

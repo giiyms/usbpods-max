@@ -25,9 +25,16 @@ The settings page lives in [`web/`](web/) (GitHub Pages after you enable it, or 
 
 P0 is that `0x58` mic. It works. Firmware in this tree must not break it. Gain is applied **after** decode, on PCM.
 
-### Host Bluetooth will steal the link
+### Another host can steal the link
 
-If the Mac or PC’s **own Bluetooth** owns the Max 2, A2DP on the dongle dies and **speakers go silent**. Forget the headset on the computer (and phone, if it grabs the buds) before using USBPods Max. Re-pair to the Pico (long-press BOOTSEL) if you flashed over older firmware — this stack advertises Apple’s vendor ID.
+If another paired host owns the Max 2, A2DP on the dongle can die and
+**speakers go silent**. Firmware attempts LibrePods ownership takeover and
+AVDTP/Windows-session recovery while keeping phone pairing. The Pico cannot
+directly disconnect an iPhone-to-Max ACL, so Apple-native coexistence is not
+guaranteed; active-phone contention can still require disconnecting (not
+forgetting) the Max on the phone. See [dual-connect diagnosis and test
+plan](DUAL-CONNECT.md). Re-pair to the Pico (long-press BOOTSEL) if you flashed
+over older firmware so the Max can discover this stack's Apple DID record.
 
 ## Why this exists
 
@@ -91,7 +98,10 @@ Logs (`[AACP]` `[MIC]` `[DEC]`) share this port. Attach them when filing issues.
 
 ### Troubleshooting
 
-- **Speakers silent, mic maybe still works:** host Bluetooth owns the Max 2. Forget the device on the Mac/PC.
+- **Speakers silent, mic maybe still works:** another host may own the Max 2.
+  Capture CDC status/logs first. If bounded takeover cannot recover, disconnect
+  (do not forget) the Max on the other host; see
+  [dual-connect recovery](DUAL-CONNECT.md).
 - **Teams/YouTube silent, TinyUSB BT still listed:** the browser cannot tap system PCM. On the settings page run **Speaker test** (scopes the page’s own tone) and watch **Ear** / **A2DP** transitions in the diagnostic log. Off-head can HID-pause the host while the USB device remains. Copy the log when it cuts.
 - **Mic level 0 after reflash:** unplug/replug so Windows drops the cached device.
 - **Watchdog loop / audio dies seconds after play:** you skipped the TinyUSB 0.18 panic patch (below).
