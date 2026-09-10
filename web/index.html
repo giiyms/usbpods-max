@@ -1798,6 +1798,7 @@
     const VID = 0xCafe;
     const USAGE_PAGE = 0xFFA0;
     const REPORT_LEN = 32;
+    const PROTOCOL_MAJOR = 1;
     const CMD = { STATUS: 1, GAIN: 2, PAIR: 3, DISCONNECT: 4, RECONNECT: 5, SLOT: 6, NOISE: 7, CA: 8 };
 
     let hid = null;
@@ -2665,27 +2666,39 @@
       paintSilentHints();
     }
 
-    function parseHid(buf) {
-      const u = new Uint8Array(buf);
-      if (u[0] !== 1) return;
-      const flags = u[1];
-      const flags2 = u[15];
-      const addr = [...u.slice(16, 22)].map((b) => b.toString(16).padStart(2, "0")).join(":");
-      applyStatus({
+    function parseHidStatus(data) {
+      if (data.byteLength !== REPORT_LEN) return null;
+      if (data.getUint8(0) !== CMD.STATUS) return null;
+      if (data.getUint8(13) !== PROTOCOL_MAJOR) return null;
+
+      const byte = (offset) => data.getUint8(offset);
+      const flags = byte(1);
+      const flags2 = byte(15);
+      const addr = Array.from(
+        { length: 6 },
+        (_, index) => byte(16 + index).toString(16).padStart(2, "0")
+      ).join(":");
+      return {
         a2dp: !!(flags & 1), aacp: !!(flags & 2), mic: !!(flags & 4),
-        gain: u[2], slot: u[3],
-        bat_l: u[4], bat_r: u[5], bat_c: u[6], bat_h: u[7],
-        noise: u[8], ear_l: u[9], ear_r: u[10], ca: u[11],
+        gain: byte(2), slot: byte(3),
+        bat_l: byte(4), bat_r: byte(5), bat_c: byte(6), bat_h: byte(7),
+        noise: byte(8), ear_l: byte(9), ear_r: byte(10), ca: byte(11),
         owns: flags2 & 1 ? 1 : 2, duck: !!(flags2 & 2),
         autocon: flags2 & 4 ? 1 : 2, earen: flags2 & 8 ? 1 : 2,
         reclaim: !!(flags2 & 0x10), paused: !!(flags2 & 0x20),
         spk: !!(flags2 & 0x40), usbstream: !!(flags2 & 0x80),
-        chime: u[22], crown: u[23], listen: u[24], gestures: u[25], hold: u[26],
-        last19_type: u[27], last19_bud: u[28],
-        autoans: u[29], adaptvol: u[30], sleep: u[31],
-        mute: u[14],
+        chime: byte(22), crown: byte(23), listen: byte(24), gestures: byte(25), hold: byte(26),
+        last19_type: byte(27), last19_bud: byte(28),
+        autoans: byte(29), adaptvol: byte(30), sleep: byte(31),
+        mute: byte(14),
         addr: addr === "00:00:00:00:00:00" ? "—" : addr
-      });
+      };
+    }
+
+    function handleHidInputReport(event) {
+      if (event.reportId !== 0) return;
+      const status = parseHidStatus(event.data);
+      if (status !== null) applyStatus(status);
     }
 
     function parseAtLine(line) {
@@ -2891,7 +2904,7 @@
       if (!dev) throw new Error("No HID device selected");
       await dev.open();
       hid = dev;
-      hid.addEventListener("inputreport", (ev) => parseHid(ev.data.buffer));
+      hid.addEventListener("inputreport", handleHidInputReport);
       hid.addEventListener("disconnect", () => { hid = null; setDisconnected(); log("HID disconnect", "down"); });
       await sendHid(CMD.STATUS);
       pollTimer = setInterval(() => sendHid(CMD.STATUS), 1000);
