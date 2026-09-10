@@ -163,7 +163,7 @@ void control_print_status_human(void) {
            "owns=%u duck=%u autocon=%u allowauto=%u earen=%u gestures=%u hold=%u "
            "crown=%u autoans=%u chime=%u adaptvol=%u sleep=%u listen=%u "
            "reclaim=%u paused=%u spk=%u stream=%u peer=%s "
-           "softexcl=%u sxphase=%s "
+           "softexcl=%u sxphase=%s sxkick=%u "
            "last19=%s vol=%u name=%s model=%s serial=%s fw=%s findmy=unsupported "
            "spk_misalign=%lu spk_rem=%u spk_half=%lu spk_swap=%u spk_l=%d spk_r=%d "
            "addr=%02x:%02x:%02x:%02x:%02x:%02x\n",
@@ -185,6 +185,7 @@ void control_print_status_human(void) {
            peer,
            softexcl_enabled() ? 1 : 0,
            softexcl_phase_str(),
+           softexcl_kick_won() ? 1 : 0,
            aacp_get_last19_hex()[0] ? aacp_get_last19_hex() : "-",
            (unsigned) get_bt_volume(),
            aacp_get_dev_name()[0] ? aacp_get_dev_name() : "-",
@@ -221,7 +222,7 @@ static void print_help(void) {
     printf("  gestures <mask>       Raw Gestures 0x39\n");
     printf("  hold noise|siri       ClickHoldMode 0x16\n");
     printf("  autocon on|off        Connect Automatically 0x20\n");
-    printf("  softexcl on|off       soft exclusive (default on): USB sink drops extra ACL, keeps iPhone paired\n");
+    printf("  softexcl on|off       soft exclusive (default on): kick extra Pico ACL; Max-only dual-connect still fights\n");
     printf("  aacpdump on|off       full CDC hex for non-dual AACP (0x0E/0x10/0x11/0x2E always full)\n");
     printf("Host Bluetooth must NOT own the headset or A2DP goes silent.\n");
 }

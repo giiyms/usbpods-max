@@ -1096,11 +1096,11 @@ static void aacp_get_self_mac(uint8_t out[6]) {
 /* LibrePods takeOver order after OWNS: media_info + showUI + hijack to each
  * 0x2E peer ≠ self. Only when USB wants sink and anti-ping-pong is clear. */
 static void aacp_send_smart_routing_hijack(bool streaming) {
-    if (!aacp_sr_should_send_hijack_gated(softexcl_enabled(),
+    if (!aacp_sr_should_send_hijack_gated(softexcl_kick_suppresses_fight(),
                                           avdtp_usb_speaker_is_open(),
                                           avdtp_usb_is_streaming(),
                                           avdtp_we_paused_after_giveup())) {
-        printf("[AACP] 0x10 hijack skipped (softexcl, USB_IDLE, or anti-ping-pong)\n");
+        printf("[AACP] 0x10 hijack skipped (softexcl kick-won, USB_IDLE, or anti-ping-pong)\n");
         return;
     }
     uint8_t self_mac[6];

@@ -47,13 +47,13 @@ static inline bool aacp_sr_should_send_hijack(bool usb_spk_open,
                                                 we_paused_after_giveup);
 }
 
-// Soft exclusive (default on) skips LibrePods 0x10 takeOver; reclaim/0x10
-// remain the fight-path fallback when softexcl is off.
-static inline bool aacp_sr_should_send_hijack_gated(bool softexcl_on,
+// Soft exclusive skips 0x10 only when kick won a Pico phone ACL. Max-only
+// dual-connect (no droppable Pico ACL) still hijacks (fight cooperates).
+static inline bool aacp_sr_should_send_hijack_gated(bool softexcl_kick_won,
                                                     bool usb_spk_open,
                                                     bool is_usb_streaming,
                                                     bool we_paused_after_giveup) {
-    if (softexcl_on) return false;
+    if (softexcl_kick_won) return false;
     return aacp_sr_should_send_hijack(usb_spk_open, is_usb_streaming,
                                       we_paused_after_giveup);
 }

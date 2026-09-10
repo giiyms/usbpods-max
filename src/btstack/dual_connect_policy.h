@@ -6,8 +6,9 @@
 // librepods-org#724 (i_paused_the_media — auto-resume after give-up must not
 // reclaim). 0x10 smart-routing builders live in aacp_smart_routing.h
 // (verbatim LibrePods AACPManager.kt). Soft exclusive (default on):
-// dual_softexcl_* drops extra ACL while USB wants the sink; reclaim / 0x10
-// fight path is the fallback when softexcl is off. Do not invent opcodes.
+// dual_softexcl_* kicks extra Pico ACLs while USB wants the sink; reclaim /
+// 0x10 fight is skipped only when kick won a Pico phone ACL. Max-only
+// dual-connect still fights. Do not invent opcodes.
 
 #ifndef USBPODS_DUAL_CONNECT_POLICY_H
 #define USBPODS_DUAL_CONNECT_POLICY_H
@@ -268,8 +269,11 @@ static inline bool dual_connect_should_clear_anti_ping_pong(
 }
 
 // --- Soft exclusive (keep iPhone paired; drop extra ACL while USB wants sink) ---
-// Default ON. Fight path (AVDTP reclaim / LibrePods 0x10 hijack) is the
-// fallback when softexcl is off. Never Forget / wipe keys / HCI-drop the Max.
+// Default ON. Kick extra Pico ACLs while HOLD. Fight path (AVDTP reclaim /
+// LibrePods 0x10) is skipped only when kick actually dropped or refused a
+// non-Max Pico ACL. Max-only dual-connect (no Pico ACL to the phone) must
+// still fight — softexcl cooperates with reclaim, it does not replace it.
+// Never Forget / wipe keys / HCI-drop the Max.
 //
 // Phase: IDLE → HOLD on USB wants sink; HOLD → GRACE on USB idle; GRACE →
 // IDLE after DUAL_SOFTEXCL_GRACE_MS if still idle. USB wants during GRACE
@@ -323,17 +327,25 @@ static inline bool dual_softexcl_should_drop_peer(const dual_softexcl_t *s) {
 }
 
 // Do not honor 0x11 / owns=00 / 0x0E they-own give-up while HOLD — that
-// would undo exclusive. Firmware kicks the phone instead.
+// would pause Windows / arm anti-ping-pong. Kick extra Pico ACLs instead;
+// Max-side steal still fights via AVDTP reclaim.
 static inline bool dual_softexcl_should_honor_giveup(const dual_softexcl_t *s) {
     return !dual_softexcl_should_drop_peer(s);
 }
 
-// Steal reclaim / 0x10 hijack only when softexcl is off (fight fallback).
+// Skip reclaim / 0x10 only when softexcl is on AND kick won a Pico phone ACL
+// (dropped or refused). softexcl_on alone must not skip fight (Daniel's
+// Max-only topology: iPhone↔Max is not a Pico HCI ACL).
+static inline bool dual_softexcl_suppresses_fight(bool softexcl_on, bool kick_won) {
+    return softexcl_on && kick_won;
+}
+
 static inline bool dual_connect_should_fight_on_steal(bool softexcl_on,
+                                                     bool kick_won,
                                                      bool usb_spk_open,
                                                      bool is_usb_streaming,
                                                      bool we_paused_after_giveup) {
-    if (softexcl_on) return false;
+    if (dual_softexcl_suppresses_fight(softexcl_on, kick_won)) return false;
     return dual_connect_should_reclaim_on_steal(usb_spk_open, is_usb_streaming,
                                                 we_paused_after_giveup);
 }
@@ -418,6 +430,18 @@ static inline bool dual_softexcl_pick_phone_peer(const dual_audio_source_t *src,
         return true;
     }
     return false;
+}
+
+static inline int dual_softexcl_count_droppable_acls(const uint8_t addrs[][6],
+                                                     int n,
+                                                     const uint8_t self[6],
+                                                     const uint8_t max_addr[6]) {
+    int c = 0;
+    if (!addrs || n <= 0) return 0;
+    for (int i = 0; i < n; i++) {
+        if (!dual_softexcl_mac_is_protected(addrs[i], self, max_addr)) c++;
+    }
+    return c;
 }
 
 #endif // USBPODS_DUAL_CONNECT_POLICY_H

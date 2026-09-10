@@ -1651,11 +1651,11 @@
         <div class="hint-strip dual-strip" id="dualStrip">
           <div class="hint-strip-head">
             <span class="section-title">Dual-connect</span>
-            <span class="hint-strip-note">Soft exclusive (default on) drops extra ACL while USB plays and keeps the iPhone paired. Fight path (reclaim / 0x10) is <code>softexcl off</code>. Owns / reclaim / USB / 0x0E peer from HID flags2 and <code>@STATUS</code>.</span>
+            <span class="hint-strip-note">Soft exclusive (default on) kicks extra Pico ACLs while USB plays and keeps the iPhone paired. Max-only dual-connect still fights (reclaim / 0x10). Owns / reclaim / USB / 0x0E peer from HID flags2 and <code>@STATUS</code>.</span>
           </div>
           <div class="hint-chips" id="dualChips"></div>
           <div class="diag-log-actions" style="margin-top:8px">
-            <button class="btn-ghost" id="btnSoftexcl" type="button" disabled title="CDC: softexcl on|off. Default on. USB sink holds exclusive; iPhone stays paired. Off restores reclaim/0x10 fight.">softexcl —</button>
+            <button class="btn-ghost" id="btnSoftexcl" type="button" disabled title="CDC: softexcl on|off. Default on. Kick extra Pico ACL while USB plays; iPhone stays paired. Max-only dual-connect still fights (reclaim/0x10).">softexcl —</button>
           </div>
         </div>
 

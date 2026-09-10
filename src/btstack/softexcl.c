@@ -23,6 +23,7 @@ static dual_softexcl_t sx;
 static bool prefs_dirty;
 static uint32_t last_kick_ms;
 static bool last_kick_valid;
+static bool kick_won;
 static btstack_timer_source_t sx_timer;
 
 static struct {
@@ -116,6 +117,9 @@ static void sx_step_now(uint32_t now_ms) {
     bool wants = dual_connect_usb_wants_sink(avdtp_usb_speaker_is_open(),
                                              avdtp_usb_is_streaming());
     dual_softexcl_step(&sx, wants, now_ms);
+    if (sx.phase != DUAL_SX_HOLD) {
+        kick_won = false;
+    }
 }
 
 static void kick(uint32_t now_ms) {
@@ -145,16 +149,17 @@ static void kick(uint32_t now_ms) {
         dropped++;
     }
 
-    if (phone_known) {
-        if (dual_softexcl_mac_is_protected(phone_mac, self, maxa)) {
-            printf("[SX] learned peer is Max/self — not disconnecting\n");
-        } else if (!acl_has_mac(phone_mac)) {
-            sx_log_mac("no Pico ACL to phone", phone_mac);
-            printf("[SX] Max-side dual-connect cannot be HCI-dropped; "
-                   "`softexcl off` restores reclaim/0x10 fight\n");
-        }
+    if (dropped > 0) {
+        kick_won = true;
+        printf("[SX] kick won (%d extra ACL) — fight suppressed while HOLD\n",
+               dropped);
+    } else if (phone_known &&
+               !dual_softexcl_mac_is_protected(phone_mac, self, maxa) &&
+               !acl_has_mac(phone_mac)) {
+        sx_log_mac("no Pico ACL to phone", phone_mac);
+        printf("[SX] Max-side dual-connect — fight path stays armed (reclaim/0x10)\n");
     } else if (dropped == 0) {
-        printf("[SX] HOLD, no extra Pico ACL (iPhone is not on this HCI)\n");
+        printf("[SX] HOLD, no extra Pico ACL — fight path stays armed\n");
     }
 }
 
@@ -165,6 +170,7 @@ void softexcl_init(void) {
     dual_softexcl_init(&sx, on);
     prefs_dirty = false;
     last_kick_valid = false;
+    kick_won = false;
     memset(acls, 0, sizeof(acls));
     src_known = false;
     devs_n = 0;
@@ -199,6 +205,15 @@ const char *softexcl_phase_str(void) { return dual_softexcl_phase_name(sx.phase)
 bool softexcl_hold_blocks_giveup(void) {
     sx_step_now(btstack_run_loop_get_time_ms());
     return !dual_softexcl_should_honor_giveup(&sx);
+}
+
+bool softexcl_kick_won(void) {
+    return kick_won;
+}
+
+bool softexcl_kick_suppresses_fight(void) {
+    sx_step_now(btstack_run_loop_get_time_ms());
+    return dual_softexcl_suppresses_fight(sx.enabled, kick_won);
 }
 
 void softexcl_poll(void) {
@@ -250,6 +265,7 @@ void softexcl_hci_connection_complete(const uint8_t addr[6], uint16_t handle,
     if (dual_softexcl_should_drop_peer(&sx) &&
         !dual_softexcl_mac_is_protected(addr, self, maxa)) {
         printf("[SX] refuse extra ACL while HOLD (disconnect, bond kept)\n");
+        kick_won = true;
         gap_disconnect(handle);
     }
 }

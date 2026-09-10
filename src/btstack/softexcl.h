@@ -3,7 +3,8 @@
 // Soft exclusive: while USB wants the sink, drop extra Pico HCI ACLs that
 // are not the AirPods Max / not self. Keep the iPhone bond (never Forget,
 // never wipe keys, never HCI-drop the Max). Fight path (AVDTP reclaim /
-// LibrePods 0x10) is the fallback when softexcl is off.
+// LibrePods 0x10) is skipped only when kick dropped or refused a Pico
+// phone ACL. Max-only dual-connect (no Pico ACL to the iPhone) still fights.
 //
 #ifndef USBPODS_SOFTEXCL_H
 #define USBPODS_SOFTEXCL_H
@@ -26,6 +27,11 @@ const char *softexcl_phase_str(void);
 
 // True in HOLD: skip 0x11 / owns=00 they-own give-up and kick instead.
 bool softexcl_hold_blocks_giveup(void);
+
+// True when HOLD kick dropped or refused a non-Max Pico ACL. Reclaim/0x10
+// skip only then. No Pico phone ACL → false → fight stays armed.
+bool softexcl_kick_suppresses_fight(void);
+bool softexcl_kick_won(void);
 
 // Call from the main loop with the BTstack lock held. Steps HOLD/GRACE/IDLE
 // from live USB speaker/stream flags and disconnects extra ACLs while HOLD.

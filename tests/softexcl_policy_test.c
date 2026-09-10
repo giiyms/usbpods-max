@@ -66,20 +66,27 @@ int main(void) {
     EQ(dual_softexcl_step(&sx, true, 4100), DUAL_SX_IDLE, "disabled stays IDLE");
     EQ(dual_softexcl_should_drop_peer(&sx), 0, "disabled no drop");
 
-    // Fight path only when softexcl off
-    EQ(dual_connect_should_fight_on_steal(true, true, true, false), 0,
-       "softexcl on → no fight");
-    EQ(dual_connect_should_fight_on_steal(false, true, false, false), 1,
-       "softexcl off → fight (existing reclaim)");
-    EQ(dual_connect_should_fight_on_steal(false, true, true, true), 0,
+    // Fight: softexcl on alone does NOT skip reclaim (Max-only dual-connect).
+    EQ(dual_connect_should_fight_on_steal(true, false, true, true, false), 1,
+       "softexcl on, no kick win → fight");
+    EQ(dual_connect_should_fight_on_steal(true, true, true, true, false), 0,
+       "softexcl on, kick won Pico ACL → no fight");
+    EQ(dual_connect_should_fight_on_steal(false, true, true, false, false), 1,
+       "softexcl off → fight even if kick_won");
+    EQ(dual_connect_should_fight_on_steal(false, false, true, true, true), 0,
        "softexcl off still honors anti-ping-pong");
+    EQ(dual_softexcl_suppresses_fight(true, false), 0, "no kick → no suppress");
+    EQ(dual_softexcl_suppresses_fight(true, true), 1, "kick won → suppress");
+    EQ(dual_softexcl_suppresses_fight(false, true), 0, "off ignores kick_won");
     EQ(dual_connect_should_reclaim_on_steal(true, true, false), 1,
        "reclaim helper unchanged");
 
+    EQ(aacp_sr_should_send_hijack_gated(false, true, true, false), 1,
+       "no kick win → 0x10 still sent");
     EQ(aacp_sr_should_send_hijack_gated(true, true, true, false), 0,
-       "softexcl gates 0x10");
+       "kick won gates 0x10");
     EQ(aacp_sr_should_send_hijack_gated(false, true, false, false), 1,
-       "softexcl off still hijacks");
+       "softexcl off / no win still hijacks");
 
     // Protected MACs: self + Max; never drop unknown/zero
     EQ(dual_softexcl_mac_is_protected(k_self, k_self, k_max), 1, "self protected");
@@ -136,8 +143,29 @@ int main(void) {
         EQS(out, k_phone, 6, "preferred 0x0E over 0x2E");
     }
 
+    // Max-only HCI (self + Max, no phone ACL) → nothing droppable → fight
+    {
+        uint8_t only_max[2][6];
+        memcpy(only_max[0], k_self, 6);
+        memcpy(only_max[1], k_max, 6);
+        EQ(dual_softexcl_count_droppable_acls(only_max, 2, k_self, k_max), 0,
+           "Max-only: no droppable Pico ACL");
+        EQ(dual_connect_should_fight_on_steal(true, false, true, true, false), 1,
+           "Max-only: softexcl HOLD still fights");
+    }
+    {
+        uint8_t with_phone[3][6];
+        memcpy(with_phone[0], k_self, 6);
+        memcpy(with_phone[1], k_max, 6);
+        memcpy(with_phone[2], k_phone, 6);
+        EQ(dual_softexcl_count_droppable_acls(with_phone, 3, k_self, k_max), 1,
+           "phone ACL is droppable");
+        EQ(dual_connect_should_fight_on_steal(true, true, true, true, false), 0,
+           "after dropping phone ACL, skip fight");
+    }
+
     printf("softexcl_policy_test: PASS "
-           "(phase HOLD/GRACE/IDLE, flash default, fight gated, "
-           "protected Max/self, pick phone from 0x0E/0x2E)\n");
+           "(phase HOLD/GRACE/IDLE, flash default, fight unless kick won, "
+           "protected Max/self, pick phone from 0x0E/0x2E, Max-only cooperates)\n");
     return 0;
 }
