@@ -5,6 +5,8 @@
 !.editorconfig
 !.vscode/launch.json
 !.vscode/settings.json
+!.cursor
+!.cursor/**
 
 # build folder
 /build*
